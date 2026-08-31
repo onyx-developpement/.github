@@ -46,7 +46,7 @@ Doit contenir **dans cet ordre** :
 3. **Prérequis** — version Java, Spring Boot, éventuelles dépendances système
 4. **Installation** — coordonnées Maven à copier dans un `pom.xml` consommateur
 5. **Configuration** — toutes les propriétés `@ConfigurationProperties` avec valeur par défaut et description
-6. **Utilisation** — exemples de code minimaux illustrant les cas d'usage principaux
+6. **Utilisation** — tableau de liens vers le README de chaque module (pas d'exemples de code dans le README racine)
 7. **Contribuer** — procédure de build local, tests, versioning (`MAJOR.MINOR.PATCH`)
 
 ### README.md à la racine de chaque module / sous-module
