@@ -16,6 +16,7 @@ on:
           - 'spa'
           - 'api-backend'
           - 'data'
+          - 'maven'
 
 jobs:
   deploy:
