@@ -116,9 +116,9 @@ if (-not $Env:GH_TOKEN -and -not $Env:GITHUB_TOKEN) {
     Write-GHALog 'warning' "Ni GH_TOKEN ni GITHUB_TOKEN n'est defini. L'authentification gh pourrait echouer."
 }
 
-# Découverte des slugs : soit le paramètre $Team, soit tous les sous-dossiers de $script:TemplateDir
+# Découverte des slugs : soit le paramètre $Team (liste séparée par des virgules), soit tous les sous-dossiers de $script:TemplateDir
 if ($Team) {
-    $slugs = @($Team)
+    $slugs = @($Team -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 } else {
     $slugs = @(Get-ChildItem -Path $script:TemplateDir -Directory | Select-Object -ExpandProperty Name)
 }

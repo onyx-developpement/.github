@@ -57,6 +57,7 @@ Doit contenir **dans cet ordre** :
 2. **Dépendances** — artefacts Maven requis (scope, version)
 3. **Auto-configuration** — classe(s) `AutoConfiguration` exposées et conditions d'activation
 4. **API publique** — liste des beans/interfaces exposés avec description courte
+5. **Configuration** — (`@ConfigurationProperties`) est documentée dans le README de **chaque module**, pas dans le README racine — les propriétés sont spécifiques à chaque module.
 5. **Configuration** — propriétés spécifiques au module (clé, type, valeur par défaut)
 6. **Exemples** — snippets d'utilisation
 

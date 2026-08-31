@@ -25,6 +25,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed teams
+        id: changed-teams
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          teams=$(git diff --name-only HEAD^ HEAD \
+            | grep '^copilot-instructions/' \
+            | awk -F'/' '{print $2}' \
+            | sort -u \
+            | tr '\n' ',' \
+            | sed 's/,$//')
+          echo "teams=$teams" >> "$GITHUB_OUTPUT"
+          echo "Equipes concernees : $teams"
 
       - name: Deploy Copilot Instructions
         env:
@@ -32,7 +48,8 @@ jobs:
           GH_TOKEN: ${{ secrets.COPILOT_DEPLOY_TOKEN }}
           # GITHUB_REPOSITORY_OWNER (org) et GITHUB_WORKSPACE (racine checkout)
           # sont positionnés automatiquement par le runner — pas besoin de les redéclarer.
-          # L'input workflow_dispatch est passé via INPUT_TEAM (convention actions/toolkit)
-          INPUT_TEAM: ${{ inputs.team }}
+          # Pour un push : on passe uniquement les équipes dont les fichiers ont changé.
+          # Pour un workflow_dispatch : on passe l'input sélectionné (vide = toutes).
+          INPUT_TEAM: ${{ github.event_name == 'push' && steps.changed-teams.outputs.teams || inputs.team }}
         shell: pwsh
         run: ./scripts/Deploy-CopilotInstructions.ps1
