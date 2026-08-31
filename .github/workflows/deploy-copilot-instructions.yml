@@ -1,0 +1,38 @@
+name: Deploy Copilot Instructions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'copilot-instructions/**'
+  workflow_dispatch:
+    inputs:
+      team:
+        description: 'Equipe cible (laisser vide pour toutes)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - 'SPA'
+          - 'API Backend'
+          - 'Data'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy Copilot Instructions
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_DEPLOY_TOKEN }}
+        shell: pwsh
+        run: |
+          $team = '${{ github.event.inputs.team }}'
+          if ($team) {
+            ./Deploy-CopilotInstructions.ps1 -Team $team
+          } else {
+            ./Deploy-CopilotInstructions.ps1
+          }
