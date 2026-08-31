@@ -32,7 +32,7 @@ jobs:
         run: |
           $team = '${{ github.event.inputs.team }}'
           if ($team) {
-            ./Deploy-CopilotInstructions.ps1 -Team $team
+            ./scripts/Deploy-CopilotInstructions.ps1 -Team $team
           } else {
-            ./Deploy-CopilotInstructions.ps1
+            ./scripts/Deploy-CopilotInstructions.ps1
           }
