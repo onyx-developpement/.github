@@ -37,6 +37,8 @@ Le groupId de chaque artefact est préfixé `maven-` (ex : `maven-fr.nutriset.sp
 
 ## Documentation obligatoire
 
+> **Règle fondamentale** : chaque répertoire contenant un `pom.xml` doit avoir son propre `README.md`. Cette règle s'applique **récursivement à tous les niveaux** de l'arborescence multi-module, y compris les sous-modules de sous-modules (ex : `azure/servicebus/`, `azure/redis/`, etc.).
+
 ### README.md à la racine du dépôt (ou du module parent)
 
 Doit contenir **dans cet ordre** :
@@ -49,7 +51,7 @@ Doit contenir **dans cet ordre** :
 6. **Utilisation** — tableau de liens vers le README de chaque module (pas d'exemples de code dans le README racine)
 7. **Contribuer** — procédure de build local, tests, versioning (`MAJOR.MINOR.PATCH`)
 
-### README.md à la racine de chaque module / sous-module
+### README.md à la racine de chaque module / sous-module (tous niveaux)
 
 Doit contenir **dans cet ordre** :
 
@@ -61,7 +63,7 @@ Doit contenir **dans cet ordre** :
 5. **Configuration** — propriétés spécifiques au module (clé, type, valeur par défaut)
 6. **Exemples** — snippets d'utilisation
 
-> Toujours maintenir ces fichiers README à jour lors de tout ajout ou modification d'API publique.
+> Toujours maintenir **tous** ces fichiers README à jour lors de tout ajout, suppression ou modification d'API publique, de module ou de sous-module.
 
 ## Gestion des versions et compatibilité
 
