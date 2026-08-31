@@ -163,13 +163,19 @@ Write-Output "Deploiement termine. OK=$totalOK  ERREURS=$totalFail"
 
 # ─── GitHub Actions Step Summary ──────────────────────────────────────────────
 if ($script:IsGHA -and $Env:GITHUB_STEP_SUMMARY) {
-    $md  = @()
-    $md += "## Deploiement Copilot Instructions"
-    $md += ""
-    $md += "- **Organisation** : $script:Org"
-    $md += "- **WhatIf** : $WhatIf"
-    $md += "- **Depots mis a jour** : $totalOK  |  **Erreurs** : $totalFail"
-    $md += ""
-    $md += $summary
-    $md -join "`n" | Out-File -FilePath $Env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+    try {
+        $md  = [System.Collections.Generic.List[string]]::new()
+        $md.Add("## Deploiement Copilot Instructions")
+        $md.Add("")
+        $md.Add("- **Organisation** : $script:Org")
+        $md.Add("- **WhatIf** : $WhatIf")
+        $md.Add("- **Depots mis a jour** : $totalOK  |  **Erreurs** : $totalFail")
+        $md.Add("")
+        $md.AddRange($summary)
+        $md | Add-Content -Path $Env:GITHUB_STEP_SUMMARY -Encoding utf8
+    } catch {
+        Write-GHALog 'warning' "Impossible d'ecrire le step summary : $_"
+    }
 }
+
+exit ($totalFail -gt 0 ? 1 : 0)
