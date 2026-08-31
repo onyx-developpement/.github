@@ -13,9 +13,9 @@ on:
         type: choice
         options:
           - ''
-          - 'SPA'
-          - 'API Backend'
-          - 'Data'
+          - 'spa'
+          - 'api-backend'
+          - 'data'
 
 jobs:
   deploy:
@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Deploy Copilot Instructions
         env:

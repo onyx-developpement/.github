@@ -15,13 +15,14 @@
 .EXAMPLE
     .\Deploy-CopilotInstructions.ps1
     .\Deploy-CopilotInstructions.ps1 -WhatIf          # simulation sans écriture
-    .\Deploy-CopilotInstructions.ps1 -Team "API Backend"  # une seule équipe
+    .\Deploy-CopilotInstructions.ps1 -Team "api-backend"  # une seule équipe (slug = nom du sous-dossier)
 #>
 
 param(
     [switch] $WhatIf,
 
-    [ValidateSet("SPA", "API Backend", "Data")]
+    # Slug de l'équipe = nom du sous-dossier dans copilot-instructions/ (ex: spa, api-backend, data)
+    # Laisser vide pour traiter tous les sous-dossiers détectés automatiquement
     [string] $Team,
 
     [string] $CommitMessage = "chore: add GitHub Copilot instructions [skip ci]"
@@ -49,11 +50,6 @@ $script:TemplateDir = if ($Env:GITHUB_WORKSPACE) {
     Join-Path $PSScriptRoot ".." "copilot-instructions"
 }
 
-$script:TeamConfig = @(
-    @{ TeamName = "SPA";         TeamSlug = "spa";         Template = Join-Path $script:TemplateDir "spa"        "copilot-instructions.md" }
-    @{ TeamName = "API Backend"; TeamSlug = "api-backend"; Template = Join-Path $script:TemplateDir "api-backend" "copilot-instructions.md" }
-    @{ TeamName = "Data";        TeamSlug = "data";         Template = Join-Path $script:TemplateDir "data"       "copilot-instructions.md" }
-)
 # ──────────────────────────────────────────────────────────────────────────────
 
 function Write-GHALog {
@@ -120,7 +116,14 @@ if (-not $Env:GH_TOKEN -and -not $Env:GITHUB_TOKEN) {
     Write-GHALog 'warning' "Ni GH_TOKEN ni GITHUB_TOKEN n'est defini. L'authentification gh pourrait echouer."
 }
 
-$configs = if ($Team) { $script:TeamConfig | Where-Object { $_.TeamName -eq $Team } } else { $script:TeamConfig }
+# Découverte des slugs : soit le paramètre $Team, soit tous les sous-dossiers de $script:TemplateDir
+if ($Team) {
+    $slugs = @($Team)
+} else {
+    $slugs = @(Get-ChildItem -Path $script:TemplateDir -Directory | Select-Object -ExpandProperty Name)
+}
+
+if ($slugs.Count -eq 0) { throw "Aucun sous-dossier trouve dans : $script:TemplateDir" }
 
 $summary   = [System.Collections.Generic.List[string]]::new()
 $totalOK   = 0
@@ -128,24 +131,26 @@ $totalFail = 0
 
 if ($script:IsGHA) { $summary.Add("| Depot | Equipe | Statut |") ; $summary.Add("|---|---|---|") }
 
-foreach ($config in $configs) {
-    if ($script:IsGHA) { Write-Output "::group::Equipe : $($config.TeamName)" }
-    else               { Write-Output ""; Write-Output "=== Equipe : $($config.TeamName) (slug: $($config.TeamSlug)) ===" }
+foreach ($slug in $slugs) {
+    $template = Join-Path $script:TemplateDir $slug "copilot-instructions.md"
 
-    if (-not (Test-Path $config.Template)) {
-        Write-GHALog 'warning' "Template introuvable : $($config.Template)"
+    if ($script:IsGHA) { Write-Output "::group::Equipe : $slug" }
+    else               { Write-Output ""; Write-Output "=== Equipe : $slug ===" }
+
+    if (-not (Test-Path $template)) {
+        Write-GHALog 'warning' "Template introuvable : $template"
         if ($script:IsGHA) { Write-Output "::endgroup::" }
         continue
     }
 
-    $repos = Get-TeamRepos -Slug $config.TeamSlug
+    $repos = Get-TeamRepos -Slug $slug
     Write-Output "  $($repos.Count) depot(s) trouve(s)"
 
     foreach ($repo in $repos) {
-        $ok = Deploy-ToRepo -Repo $repo -TemplatePath $config.Template
+        $ok = Deploy-ToRepo -Repo $repo -TemplatePath $template
         if ($script:IsGHA) {
             $icon = if ($ok) { ':white_check_mark:' } else { ':x:' }
-            $summary.Add("| $repo | $($config.TeamName) | $icon |")
+            $summary.Add("| $repo | $slug | $icon |")
         }
         if ($ok) { $totalOK++ } else { $totalFail++ }
     }
