@@ -11,7 +11,7 @@
 
 ## Architecture & patterns
 
-- Architecture en couches classique : `controller` → `service` → `repository`
+- Architecture en couches classique : `definition` (interfaces API) → `controller` (implémentations) → `service` → `repository`
 - Reactive streams : utiliser `Mono<T>` et `Flux<T>` de Project Reactor — **ne jamais bloquer** (pas de `.block()`)
 - Endpoints avec `@RestController` + `@GetMapping` / `@PostMapping` / etc.
 - Repositories réactifs : `ReactiveCrudRepository` ou `R2dbcRepository`
@@ -19,7 +19,12 @@
 ## Conventions de code
 
 - Nommage : camelCase pour variables/méthodes, PascalCase pour classes, UPPER_SNAKE_CASE pour constantes
-- Les classes de service ont le suffixe `Service`, les implémentations `ServiceImpl`
+- **Services** : interface préfixée `I` et suffixe `Service` (ex : `IFinanceService`), implémentation avec suffixe uniquement (ex : `FinanceService`)
+- **Repositories** : même convention — interface `IFinanceRepository`, implémentation `FinanceRepository`
+- **Définition d'API** : dans le package `definition`
+  - Un fichier par DTO
+  - Une interface par domaine contenant les mappings Spring (ex : `IApiFinance`)
+- **Contrôleurs** : dans le package `controller`, l'implémentation porte le suffixe `Controller` (ex : `ApiFinanceController`)
 - Les DTOs ont le suffixe `Dto` (request) ou `Response` (response)
 - Toujours annoter les endpoints avec `@Operation` (Springdoc OpenAPI)
 

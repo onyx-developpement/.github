@@ -27,12 +27,11 @@ jobs:
 
       - name: Deploy Copilot Instructions
         env:
+          # GH_TOKEN est lu automatiquement par gh CLI pour l'authentification
           GH_TOKEN: ${{ secrets.COPILOT_DEPLOY_TOKEN }}
+          # GITHUB_REPOSITORY_OWNER (org) et GITHUB_WORKSPACE (racine checkout)
+          # sont positionnés automatiquement par le runner — pas besoin de les redéclarer.
+          # L'input workflow_dispatch est passé via INPUT_TEAM (convention actions/toolkit)
+          INPUT_TEAM: ${{ inputs.team }}
         shell: pwsh
-        run: |
-          $team = '${{ github.event.inputs.team }}'
-          if ($team) {
-            ./scripts/Deploy-CopilotInstructions.ps1 -Team $team
-          } else {
-            ./scripts/Deploy-CopilotInstructions.ps1
-          }
+        run: ./scripts/Deploy-CopilotInstructions.ps1

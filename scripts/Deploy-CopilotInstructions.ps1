@@ -29,23 +29,51 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ─── GitHub Actions : lecture des inputs via variables d'environnement ─────────
+$script:IsGHA = $Env:GITHUB_ACTIONS -eq 'true'
+
+if ($script:IsGHA) {
+    if ($Env:INPUT_WHATIF         -eq 'true') { $WhatIf        = $true }
+    if ($Env:INPUT_TEAM)                      { $Team          = $Env:INPUT_TEAM }
+    if ($Env:INPUT_COMMIT_MESSAGE)            { $CommitMessage = $Env:INPUT_COMMIT_MESSAGE }
+}
+
 # ─── Configuration ────────────────────────────────────────────────────────────
-$script:Org        = "onyx-developpement"
+# GITHUB_REPOSITORY_OWNER est positionné automatiquement par le runner GitHub Actions
+$script:Org        = if ($Env:GITHUB_REPOSITORY_OWNER) { $Env:GITHUB_REPOSITORY_OWNER } else { "onyx-developpement" }
 $script:TargetFile = ".github/copilot-instructions.md"
-$script:TemplateDir = Join-Path $PSScriptRoot "copilot-instructions"
+# GITHUB_WORKSPACE pointe sur la racine du checkout dans GitHub Actions
+$script:TemplateDir = if ($Env:GITHUB_WORKSPACE) {
+    Join-Path $Env:GITHUB_WORKSPACE "copilot-instructions"
+} else {
+    Join-Path $PSScriptRoot ".." "copilot-instructions"
+}
 
 $script:TeamConfig = @(
-    @{ TeamName = "SPA";         TeamSlug = "spa";          Template = Join-Path $script:TemplateDir "spa\copilot-instructions.md" }
-    @{ TeamName = "API Backend"; TeamSlug = "api-backend";  Template = Join-Path $script:TemplateDir "api-backend\copilot-instructions.md" }
-    @{ TeamName = "Data";        TeamSlug = "data";          Template = Join-Path $script:TemplateDir "data\copilot-instructions.md" }
+    @{ TeamName = "SPA";         TeamSlug = "spa";         Template = Join-Path $script:TemplateDir "spa"        "copilot-instructions.md" }
+    @{ TeamName = "API Backend"; TeamSlug = "api-backend"; Template = Join-Path $script:TemplateDir "api-backend" "copilot-instructions.md" }
+    @{ TeamName = "Data";        TeamSlug = "data";         Template = Join-Path $script:TemplateDir "data"       "copilot-instructions.md" }
 )
 # ──────────────────────────────────────────────────────────────────────────────
+
+function Write-GHALog {
+    param([string] $Level, [string] $Message)
+    if ($script:IsGHA) {
+        Write-Output "::${Level}::${Message}"
+    } elseif ($Level -eq 'warning') {
+        Write-Warning $Message
+    } elseif ($Level -eq 'error') {
+        Write-Error $Message -ErrorAction Continue
+    } else {
+        Write-Output $Message
+    }
+}
 
 function Get-TeamRepos {
     param([string] $Slug)
     $result = gh api "orgs/$script:Org/teams/$Slug/repos" --paginate --jq '.[] | select(.archived == false) | .full_name'
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "  Impossible de recuperer les depots du slug '$Slug'"
+        Write-GHALog 'warning' "Impossible de recuperer les depots du slug '$Slug'"
         return @()
     }
     # Garantir un tableau meme si 1 seul résultat
@@ -57,7 +85,7 @@ function Deploy-ToRepo {
 
     if ($WhatIf) {
         Write-Output "  [WhatIf] $Repo --> $script:TargetFile"
-        return
+        return $true
     }
 
     $content        = Get-Content $TemplatePath -Raw -Encoding UTF8
@@ -76,33 +104,67 @@ function Deploy-ToRepo {
     if ($LASTEXITCODE -eq 0) {
         $verb = if ($sha) { "mis a jour" } else { "cree" }
         Write-Output "  [OK] $Repo ($verb)"
+        return $true
     } else {
-        Write-Warning "  [ERREUR] $Repo : $out"
+        Write-GHALog 'error' "[ERREUR] $Repo : $out"
+        return $false
     }
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "gh CLI introuvable." }
 
+# GH_TOKEN est utilisé automatiquement par gh CLI (secrets.COPILOT_DEPLOY_TOKEN dans le workflow)
+# GITHUB_TOKEN est le fallback natif GitHub Actions
+if (-not $Env:GH_TOKEN -and -not $Env:GITHUB_TOKEN) {
+    Write-GHALog 'warning' "Ni GH_TOKEN ni GITHUB_TOKEN n'est defini. L'authentification gh pourrait echouer."
+}
+
 $configs = if ($Team) { $script:TeamConfig | Where-Object { $_.TeamName -eq $Team } } else { $script:TeamConfig }
 
+$summary   = [System.Collections.Generic.List[string]]::new()
+$totalOK   = 0
+$totalFail = 0
+
+if ($script:IsGHA) { $summary.Add("| Depot | Equipe | Statut |") ; $summary.Add("|---|---|---|") }
+
 foreach ($config in $configs) {
-    Write-Output ""
-    Write-Output "=== Equipe : $($config.TeamName) (slug: $($config.TeamSlug)) ==="
+    if ($script:IsGHA) { Write-Output "::group::Equipe : $($config.TeamName)" }
+    else               { Write-Output ""; Write-Output "=== Equipe : $($config.TeamName) (slug: $($config.TeamSlug)) ===" }
 
     if (-not (Test-Path $config.Template)) {
-        Write-Warning "Template introuvable : $($config.Template)"
+        Write-GHALog 'warning' "Template introuvable : $($config.Template)"
+        if ($script:IsGHA) { Write-Output "::endgroup::" }
         continue
     }
 
     $repos = Get-TeamRepos -Slug $config.TeamSlug
-
     Write-Output "  $($repos.Count) depot(s) trouve(s)"
 
     foreach ($repo in $repos) {
-        Deploy-ToRepo -Repo $repo -TemplatePath $config.Template
+        $ok = Deploy-ToRepo -Repo $repo -TemplatePath $config.Template
+        if ($script:IsGHA) {
+            $icon = if ($ok) { ':white_check_mark:' } else { ':x:' }
+            $summary.Add("| $repo | $($config.TeamName) | $icon |")
+        }
+        if ($ok) { $totalOK++ } else { $totalFail++ }
     }
+
+    if ($script:IsGHA) { Write-Output "::endgroup::" }
 }
 
 Write-Output ""
-Write-Output "Deploiement termine."
+Write-Output "Deploiement termine. OK=$totalOK  ERREURS=$totalFail"
+
+# ─── GitHub Actions Step Summary ──────────────────────────────────────────────
+if ($script:IsGHA -and $Env:GITHUB_STEP_SUMMARY) {
+    $md  = @()
+    $md += "## Deploiement Copilot Instructions"
+    $md += ""
+    $md += "- **Organisation** : $script:Org"
+    $md += "- **WhatIf** : $WhatIf"
+    $md += "- **Depots mis a jour** : $totalOK  |  **Erreurs** : $totalFail"
+    $md += ""
+    $md += $summary
+    $md -join "`n" | Out-File -FilePath $Env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+}
