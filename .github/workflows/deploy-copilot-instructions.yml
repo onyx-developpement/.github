@@ -42,10 +42,22 @@ jobs:
           echo "teams=$teams" >> "$GITHUB_OUTPUT"
           echo "Equipes concernees : $teams"
 
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: onyx-developpement
+
+      - name: Deploy Copilot Instructions (App Token)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: ./scripts/Deploy-CopilotInstructions.ps1
       - name: Deploy Copilot Instructions
         env:
           # GH_TOKEN est lu automatiquement par gh CLI pour l'authentification
-          GH_TOKEN: ${{ secrets.COPILOT_DEPLOY_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # GITHUB_REPOSITORY_OWNER (org) et GITHUB_WORKSPACE (racine checkout)
           # sont positionnés automatiquement par le runner — pas besoin de les redéclarer.
           # Pour un push : on passe uniquement les équipes dont les fichiers ont changé.
