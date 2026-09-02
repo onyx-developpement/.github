@@ -43,7 +43,7 @@ jobs:
           echo "Equipes concernees : $teams"
 
       - name: Create GitHub App Token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.APP_ID }}
@@ -51,10 +51,6 @@ jobs:
           owner: onyx-developpement
 
       - name: Deploy Copilot Instructions (App Token)
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: ./scripts/Deploy-CopilotInstructions.ps1
-      - name: Deploy Copilot Instructions
         env:
           # GH_TOKEN est lu automatiquement par gh CLI pour l'authentification
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
