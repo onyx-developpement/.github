@@ -75,6 +75,7 @@ service/PipelineService.java           → injecte IApiMsFabric directement
 - MapStruct est hérité transitvement via `fr.nutriset:api` → `fr.nutriset:common` — **ne pas le redéclarer dans le `pom.xml`**
 - Utiliser en priorité les annotations MapStruct : `@Mapping`, `@Mappings`, `@BeanMapping`, `expression`, `ignore`, etc.
 - Utiliser `@BeanMapping(ignoreByDefault = true)` plutôt que des `@Mapping(ignore = true)` individuels — seuls les champs explicitement mappés sont renseignés
+- Toute conversion de valeur entre deux enums, ou entre un enum et une `String` (ex : statut brut Fabric ↔ enum exposé côté API), doit être implémentée dans le mapper MapStruct correspondant via un **EnumMapping** (`@ValueMapping`/`@ValueMappings`, avec `@InheritInverseConfiguration` pour la conversion inverse), et non par une méthode statique ou un champ ajouté sur l'enum lui-même
 
 **Exemple :**
 ```java
@@ -86,6 +87,25 @@ public interface PipelineMapper {
     PipelineDTO toRunPipelineResponse(ResponseEntity<Void> responseEntity);
 
     default String extractLastSegment(String location) { ... }
+}
+```
+
+**Conversion enum ↔ enum ou enum ↔ String (EnumMapping) :**
+```java
+@Mapper(componentModel = MappingConstants.ComponentModel.SPRING)
+public interface JobMapper {
+    @ValueMappings({
+        @ValueMapping(source = "NotStarted", target = "NOT_STARTED"),
+        @ValueMapping(source = "InProgress", target = "IN_PROGRESS"),
+        @ValueMapping(source = "Completed",  target = "COMPLETED"),
+        @ValueMapping(source = "Failed",     target = "FAILED"),
+        @ValueMapping(source = "Cancelled",  target = "CANCELLED"),
+        @ValueMapping(source = "Deduped",    target = "DEDUPED")
+    })
+    EJobStatus toEJobStatus(String fabricStatus);
+
+    @InheritInverseConfiguration(name = "toEJobStatus")
+    String toFabricStatus(EJobStatus status);
 }
 ```
 
