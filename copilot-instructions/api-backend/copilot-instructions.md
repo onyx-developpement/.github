@@ -147,6 +147,12 @@ fabric:
       item-id: ${fabric-etl-commandes-item-id}
 ```
 
+## Migrations SQL (Flyway)
+
+- Faire **le moins de scripts de migration possible** pour une évolution donnée : regrouper dans un seul script tout ce qui peut l'être plutôt que de multiplier les fichiers `Vxx__*.sql`.
+- Exception : les changements qui nécessitent une séquence nullable → backfill → `NOT NULL` (ajout d'une colonne obligatoire sur une table déjà peuplée) restent découpés en plusieurs scripts successifs, car cette séparation est imposée par la contrainte de disponibilité (pas de verrou long, pas de données invalides).
+- Si une migration déjà appliquée doit être modifiée (correction, ajustement de règle, etc.), **toujours demander à l'utilisateur** s'il faut créer un **nouveau script de migration** ou modifier le script existant, avant de faire le choix soi-même.
+
 ## Gestion des erreurs
 
 - Utiliser `onErrorResume`, `onErrorMap`, `onErrorReturn` dans les chaînes réactives
