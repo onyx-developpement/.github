@@ -164,6 +164,9 @@ fabric:
 - Tests unitaires : **JUnit 5** + **Mockito** + `StepVerifier` (Reactor Test) pour les flux réactifs
 - Tests d'intégration : `@SpringBootTest` avec `WebTestClient`
 - Nommage : `{ClasseTestée}Test.java` pour unitaires, `{ClasseTestée}IT.java` pour intégration
+- **Toujours lancer Maven avec les profils `app-dependencies,webapp`** (ex : `mvn -P app-dependencies,webapp test`), sinon :
+  - le profil `app-dependencies` (ce pom) n'étant pas actif par défaut, les dépendances internes manquent à la compilation ;
+  - le profil `definition` du parent `fr.nutriset:api`, actif par défaut (`activeByDefault`), force `<skip>true</skip>` sur `testCompile` (utilisé pour publier un jar « définition » sans tests) — seule l'activation explicite du profil `webapp` du parent le désactive.
 
 ## Sécurité
 
