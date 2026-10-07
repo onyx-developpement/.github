@@ -59,13 +59,13 @@ $script:RootTemplate = Join-Path $script:TemplateDir "copilot-instructions.md"
 function Write-GHALog {
     param([string] $Level, [string] $Message)
     if ($script:IsGHA) {
-        Write-Output "::${Level}::${Message}"
+        Write-Host "::${Level}::${Message}"
     } elseif ($Level -eq 'warning') {
         Write-Warning $Message
     } elseif ($Level -eq 'error') {
         Write-Error $Message -ErrorAction Continue
     } else {
-        Write-Output $Message
+        Write-Host $Message
     }
 }
 
@@ -84,7 +84,7 @@ function Deploy-ToRepo {
     param([string] $Repo, [string] $Content)
 
     if ($WhatIf) {
-        Write-Output "  [WhatIf] $Repo --> $script:TargetFile"
+        Write-Host "  [WhatIf] $Repo --> $script:TargetFile"
         return $true
     }
 
@@ -102,7 +102,7 @@ function Deploy-ToRepo {
 
     if ($LASTEXITCODE -eq 0) {
         $verb = if ($sha) { "mis a jour" } else { "cree" }
-        Write-Output "  [OK] $Repo ($verb)"
+        Write-Host "  [OK] $Repo ($verb)"
         return $true
     } else {
         Write-GHALog 'error' "[ERREUR] $Repo : $out"
