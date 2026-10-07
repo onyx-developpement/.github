@@ -17,6 +17,7 @@ on:
           - 'api-backend'
           - 'data'
           - 'maven'
+          - 'npm'
 
 jobs:
   deploy:
