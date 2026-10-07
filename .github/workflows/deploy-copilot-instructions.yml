@@ -33,14 +33,21 @@ jobs:
         if: github.event_name == 'push'
         shell: bash
         run: |
-          teams=$(git diff --name-only HEAD^ HEAD \
-            | grep '^copilot-instructions/' \
-            | awk -F'/' '{print $2}' \
-            | sort -u \
-            | tr '\n' ',' \
-            | sed 's/,$//')
+          changed=$(git diff --name-only HEAD^ HEAD)
+          # Fichier racine modifié : valeur vide = toutes les équipes
+          if echo "$changed" | grep -qx 'copilot-instructions/copilot-instructions.md'; then
+            teams=""
+            echo "Fichier racine modifie : toutes les equipes"
+          else
+            teams=$(echo "$changed" \
+              | { grep '^copilot-instructions/[^/]*/' || true; } \
+              | awk -F'/' '{print $2}' \
+              | sort -u \
+              | tr '\n' ',' \
+              | sed 's/,$//')
+            echo "Equipes concernees : $teams"
+          fi
           echo "teams=$teams" >> "$GITHUB_OUTPUT"
-          echo "Equipes concernees : $teams"
 
       - name: Create GitHub App Token
         uses: actions/create-github-app-token@v3

@@ -1,132 +1,88 @@
-# GitHub Copilot Instructions — SPA Contrôle de Gestion
-
-Application React de dépôt et de traitement des fichiers P&L (Profit & Loss) des filiales.
-La documentation fonctionnelle détaillée se trouve dans [`docs/`](../docs/README.md) — **la lire avant
-toute modification d'une page existante**.
+# GitHub Copilot Instructions — SPA React
 
 ## Stack technique
 
-- **React 19** — composants fonctionnels uniquement
-- **TypeScript** (mode strict, décorateurs legacy activés)
-- **Vite 8** (bundler) + **react-router-dom 7** (data router)
-- **`@nutriset/react`** — socle applicatif interne publié sur Azure Artifacts : configuration,
-  authentification MSAL, client REST décoré, layout Fluent UI
+- **React 18+**
+- **TypeScript** (strict mode activé)
+- **Vite** (bundler)
 - Gestion d'état : mécanismes natifs React — `useState`, `useContext` (pas de librairie externe)
-- UI : **Fluent UI** (`@fluentui/react-components`, `@fluentui/react-icons`)
-- Lecture de fichiers Excel : `xlsx` et `@extend-ai/react-xlsx` (viewer WASM)
+- UI : **Fluent UI** (`@fluentui/react-components`, `@fluentui/react-icons`, `@fluentui/react-nav`)
 - Tests : **Vitest** + **React Testing Library**
-- Lint : **oxlint**
 
 ## Architecture & patterns
 
-Structure hybride « pages feature-sliced ». L'infrastructure technique (MSAL, REST, layout) n'est
-**pas** dans ce dépôt : elle vient du socle `@nutriset/react`.
+Structure hybride "pages feature-sliced" :
 
 ```
-docs/              ← documentation fonctionnelle (à tenir à jour)
 src/
-├── components/    ← composants partagés à l'application
-├── model/         ← DTO et constantes métier (pnl.model.ts)
-├── service/       ← déclaration de l'API REST et service métier
-├── menu.tsx       ← entrées du menu de navigation
-├── App.tsx        ← amorçage du socle + déclaration des routes
+├── components/   ← composants partagés
+├── engine/       ← infrastructure technique (MSAL, appels REST...)
+├── layout/       ← structure visuelle de l'application
+├── model/        ← modèles de données / types partagés
+├── service/      ← services métier et appels API
 └── pages/
-    ├── depot/
+    ├── depot/        ← composants propres à cette page
     ├── filiales/
     ├── historique/
-    ├── libelles-communs/
-    └── mappings/
+    └── ...
 ```
 
-### Ce que fournit le socle
-
-| Import | Rôle |
-| --- | --- |
-| `initCore({ apiUrl, basePath, dev, useMocks })` | Injecte la configuration ; appelé **une fois** au niveau module dans `App.tsx`, avant tout rendu |
-| `useAuthBootstrap()` | Charge le config server, initialise MSAL, gère la redirection Entra ID ; retourne `{ msal, ready, error, getToken }` |
-| `SocleProvider` | `FluentProvider` + `MsalProvider` + écran de chargement / d'erreur |
-| `AppLayout` | Topbar + menu + zone de contenu ; router-agnostique (`sections`, `selectedPath`, `onNavigate`, `children`) |
-| `RestClient`, `@RequestMapping`, `@GetMapping`… | Client REST par décorateurs |
-| `ConfigurationProperties`, `getCoreOptions()` | Accès à la configuration chargée |
-
-Le socle ne lit pas `import.meta.env` : toute variable d'environnement lui est passée via `initCore`.
-
-### Règles
-
-- Les appels HTTP ne se font que depuis `service/`, jamais dans un composant
-- Un endpoint = une méthode décorée dans `ApiControleGestion`, exposée via `BusinessService`
-- Les composants consomment les données via `useService()`
+- Composants fonctionnels uniquement — pas de class components
 - Custom hooks pour la logique réutilisable (préfixe `use`)
-- Ne pas réimplémenter dans l'application ce que le socle fournit déjà — si le socle doit évoluer,
-  le signaler plutôt que de contourner
+- Les appels API se font depuis `service/` ou `engine/`, jamais directement dans les composants
 
 ## Conventions de code
 
-- Nommage : PascalCase pour composants et types, camelCase pour variables/fonctions,
-  UPPER_SNAKE_CASE pour constantes
+- Nommage : PascalCase pour composants et types, camelCase pour variables/fonctions, UPPER_SNAKE_CASE pour constantes
 - Un composant par fichier, le fichier porte le nom du composant
 - Toujours typer explicitement les props (interface `{Composant}Props`)
 - Préférer `interface` pour les props, `type` pour les unions/intersections
+- Utiliser `const` et arrow functions pour les composants
 - Pas de `any` — typer toutes les réponses API et les états
-- Libellés, messages et commentaires en français
 
 ## Composants UI
 
-- Utiliser exclusivement les composants **Fluent UI** — ne pas créer de composant custom si Fluent UI
-  en fournit un équivalent
+- Utiliser exclusivement les composants **Fluent UI** (`@fluentui/react-components`) — ne pas créer de composant custom si Fluent UI en fournit un équivalent
 - Utiliser `@fluentui/react-icons` pour les icônes
-- Styliser avec `makeStyles` + `tokens` ; pas de styles inline qui court-circuitent le design system
-- `makeStyles` (Griffel) interdit les raccourcis CSS (`borderColor`, `borderWidth`…) : utiliser
-  `shorthands.*`
+- Respecter le thème Fluent UI — pas de styles CSS inline qui court-circuitent le design system
 
 ## Tests
 
 - Tester le comportement, pas l'implémentation
 - Utiliser `screen.getByRole`, `screen.getByText` (pas `getByTestId` en priorité)
-- Nommage : `{Composant}.test.tsx`, à côté du composant
+- Nommage : `{Composant}.test.tsx`
 
 ## Sécurité
 
 - Ne jamais utiliser `dangerouslySetInnerHTML` sans sanitisation
-- Authentification via **MSAL**, encapsulée par le socle — ne jamais manipuler un token dans un
-  composant ; les tokens s'obtiennent via le `getToken` passé au `ServiceProvider`
+- Authentification via **MSAL** (géré dans `engine/`) — ne pas manipuler les tokens directement dans les composants
 - Variables d'environnement via `import.meta.env.VITE_*`, jamais de secrets côté client
-- La configuration Entra ID est lue au démarrage depuis `GET {VITE_API_URL}/frontend-config`
 
-## Documentation
+## Autorisation (rôles et permissions)
 
-La documentation fonctionnelle vit dans `docs/` et sert autant aux développeurs qu'aux assistants IA :
-elle doit permettre de comprendre l'application **sans lire le code**.
+Détail : `docs/securite-roles.md`. Plan côté API : `docs/plan-securite-api.md`.
 
-```
-docs/
-├── README.md                    ← index, vocabulaire métier, parcours principaux
-├── architecture.md              ← couches, amorçage, authentification, configuration
-├── domaine.md                   ← DTO, types P&L, règles transverses
-├── api.md                       ← endpoints REST consommés
-└── fonctionnalites/
-    └── {page}.md                ← une fiche par page de l'application
-```
+- Les **rôles Entra ID** (`ApiControleGestion.*`) n'existent que côté API. La SPA ne les lit **jamais** : pas de décodage de jeton, pas de comparaison de nom de rôle, pas de mapping rôle → fonctionnalité.
+- La SPA raisonne uniquement en **permissions** (`deposit:read`, `deposit:write`, `common-labels:write`, `common-label-codes:write`, `subsidiaries:write`), calculées par l'API et reçues via `GET /api/me` (`service.getMe()`). Le catalogue et le mapping rôle → permission sont gérés dans la configuration de l'API.
+- Le moteur d'autorisation vient du socle `@nutriset/react` : ne pas le réimplémenter ni l'envelopper dans l'application.
 
-### Quand la mettre à jour
+| Besoin | Outil |
+| --- | --- |
+| Verrouiller une route | `<RequirePermission permission="…">` autour de la page, dans `App.tsx` |
+| Masquer une entrée de menu | champ `permission` de l'entrée dans `menu.tsx`, filtré par `filterNavSections(MENU, can)` |
+| Masquer ou désactiver une action dans une page | `useCan('…')` |
+| Lire l'état des droits | `useAuthorization()` (`ready`, `failed`, `can`) |
 
-Toute modification qui change le comportement observable de l'application impose de mettre à jour la
-documentation **dans le même commit** : nouvelle page, nouvelle action, nouvelle règle de validation,
-nouveau statut, nouvel endpoint, changement de parcours utilisateur.
+Règles :
 
-### Comment l'écrire
-
-- Décrire le **comportement métier**, pas l'implémentation : pas de nom de `useState`, pas d'extrait
-  de JSX, pas de détail de style
-- Citer en revanche les noms exacts des routes, méthodes de `BusinessService`, types et constantes :
-  ce sont les points d'ancrage qui permettent de relier la documentation au code
-- Privilégier les tableaux et les listes numérotées aux paragraphes
-- Rendre les états et transitions explicites : « à l'étape N, le bouton X est actif si … »
-- Énumérer exhaustivement les valeurs possibles (types P&L, mois attendus, colonnes affichées)
-- Documenter les cas d'erreur et le message vu par l'utilisateur
-- Une fiche par page, structurée de la même façon : *But métier*, *Parcours utilisateur*, *Actions*,
-  *Règles métier*, *Cas d'erreur*, *Appels service*
-- Lier les fiches entre elles avec des liens relatifs
+- **Tout ajout, quel qu'il soit** (fonctionnalité, page, route, entrée de menu, action, bouton, formulaire, appel API, etc.) : demander systématiquement à l'utilisateur, avant d'implémenter, s'il faut **réutiliser une permission existante** (si l'une est pertinente, la proposer explicitement) ou **en créer une nouvelle**. Ne jamais trancher seul, y compris quand l'ajout semble mineur.
+- **Toute nouvelle page ou action sensible** doit porter sa permission à deux endroits : l'entrée de menu *et* la route. Masquer le menu seul ne protège rien, l'URL reste atteignable.
+- Une route sans verrou est un oubli, pas un choix : toute page métier est enveloppée dans `RequirePermission`.
+- **Ne jamais décider avant `ready`** : `can()` renvoie `false` pendant le chargement, ce qui ne signifie pas « refusé ». `RequirePermission` gère déjà cet état ; dans un composant, vérifier `ready` avant d'afficher un refus.
+- Un échec de `GET /api/me` n'accorde **aucune** permission. Ne jamais ajouter de repli permissif (« en cas d'erreur, tout autoriser »).
+- Les noms de permissions sont des chaînes libres : une coquille compile mais refuse l'accès sans erreur. Les recopier exactement depuis `docs/securite-roles.md` et mettre ce document à jour à chaque nouvelle permission.
+- Ces verrous sont **cosmétiques**. L'autorisation effective est celle que l'API applique sur chaque route : toute nouvelle permission côté SPA suppose le verrou correspondant côté API (voir `docs/plan-securite-api.md`).
+- Mode maquette (`useMocks`) : `MockApiControleGestion.getMe()` accorde toutes les permissions. Pour tester un parcours restreint, modifier la liste renvoyée par ce mock.
 
 ## Format de réponse préféré
 

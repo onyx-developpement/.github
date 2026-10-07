@@ -8,6 +8,9 @@
     - Equipe "API Backend"  → instructions Spring WebFlux
     - Equipe "Data"         → instructions Microsoft Fabric
 
+    Le fichier déployé = copilot-instructions/copilot-instructions.md (racine, commun)
+    suivi du fichier spécifique à l'équipe.
+
 .PREREQUISITES
     - GitHub CLI (gh) installé et authentifié (gh auth login)
     - Droits admin ou maintainer sur les équipes de l'organisation
@@ -49,6 +52,7 @@ $script:TemplateDir = if ($Env:GITHUB_WORKSPACE) {
 } else {
     Join-Path $PSScriptRoot ".." "copilot-instructions"
 }
+$script:RootTemplate = Join-Path $script:TemplateDir "copilot-instructions.md"
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -77,15 +81,14 @@ function Get-TeamRepos {
 }
 
 function Deploy-ToRepo {
-    param([string] $Repo, [string] $TemplatePath)
+    param([string] $Repo, [string] $Content)
 
     if ($WhatIf) {
         Write-Output "  [WhatIf] $Repo --> $script:TargetFile"
         return $true
     }
 
-    $content        = Get-Content $TemplatePath -Raw -Encoding UTF8
-    $encoded        = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($content))
+    $encoded        = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
 
     # SHA requis si le fichier existe déjà (sinon 409 Conflict)
     $existing = gh api "repos/$Repo/contents/$script:TargetFile" 2>$null | ConvertFrom-Json
@@ -125,6 +128,9 @@ if ($Team) {
 
 if ($slugs.Count -eq 0) { throw "Aucun sous-dossier trouve dans : $script:TemplateDir" }
 
+if (-not (Test-Path $script:RootTemplate)) { throw "Fichier racine introuvable : $script:RootTemplate" }
+$rootContent = (Get-Content $script:RootTemplate -Raw -Encoding UTF8).TrimEnd()
+
 $summary   = [System.Collections.Generic.List[string]]::new()
 $totalOK   = 0
 $totalFail = 0
@@ -143,11 +149,14 @@ foreach ($slug in $slugs) {
         continue
     }
 
+    $teamContent = (Get-Content $template -Raw -Encoding UTF8).TrimEnd()
+    $content     = "$rootContent`n`n---`n`n$teamContent`n"
+
     $repos = Get-TeamRepos -Slug $slug
     Write-Output "  $($repos.Count) depot(s) trouve(s)"
 
     foreach ($repo in $repos) {
-        $ok = Deploy-ToRepo -Repo $repo -TemplatePath $template
+        $ok = Deploy-ToRepo -Repo $repo -Content $content
         if ($script:IsGHA) {
             $icon = if ($ok) { ':white_check_mark:' } else { ':x:' }
             $summary.Add("| $repo | $slug | $icon |")

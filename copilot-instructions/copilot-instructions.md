@@ -26,5 +26,3 @@
 ### Git
 
 - Ne jamais faire de commit automatiquement : les commits doivent toujours être initiés explicitement par le développeur
-
-> Pour les instructions spécifiques à votre type de dépôt, voir le fichier `.github/copilot-instructions.md` du dépôt.
