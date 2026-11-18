@@ -152,6 +152,16 @@ fabric:
 - Faire **le moins de scripts de migration possible** pour une évolution donnée : regrouper dans un seul script tout ce qui peut l'être plutôt que de multiplier les fichiers `Vxx__*.sql`.
 - Exception : les changements qui nécessitent une séquence nullable → backfill → `NOT NULL` (ajout d'une colonne obligatoire sur une table déjà peuplée) restent découpés en plusieurs scripts successifs, car cette séparation est imposée par la contrainte de disponibilité (pas de verrou long, pas de données invalides).
 - Si une migration déjà appliquée doit être modifiée (correction, ajustement de règle, etc.), **toujours demander à l'utilisateur** s'il faut créer un **nouveau script de migration** ou modifier le script existant, avant de faire le choix soi-même.
+- Avant de créer une migration qui prolonge une évolution en cours, demander si les scripts précédents de cette évolution sont déjà appliqués (test, production) : c'est ce qui décide entre un nouveau script et un regroupement. Ne jamais regrouper ni renuméroter de lui-même.
+- Terminer chaque script par un commentaire `-- Rollback :` qui décrit le retour arrière.
+- Un changement de clé (par exemple un code remplacé par un identifiant) suit : colonne nullable, reprise des données, `NOT NULL` et clé étrangère, recréation des index qui dépendent de l'ancienne colonne, puis suppression de l'ancienne colonne.
+- Toute modification de schéma touche aussi la réplication (Debezium), l'ingestion bronze→silver, le Gold et la SPA : suivre le skill `schema-change-end-to-end`.
+
+## Contrat d'API
+
+- Renommer ou supprimer un champ de DTO ou un paramètre de requête est un changement de contrat : demander s'il est exposé tel quel ou masqué derrière l'ancien contrat, et le coordonner avec la SPA (modèle, services, mock).
+- Un champ en lecture seule (identifiant, horodatage, indicateur calculé) est mappé en lecture uniquement et ignoré à l'écriture.
+- Un champ ajouté à un DTO est ajouté dans chaque sens du mapper qui le concerne ; un champ figé après création n'entre pas dans le mapping de mise à jour.
 
 ## Gestion des erreurs
 
@@ -164,7 +174,11 @@ fabric:
 - Tests unitaires : **JUnit 5** + **Mockito** + `StepVerifier` (Reactor Test) pour les flux réactifs
 - Tests d'intégration : `@SpringBootTest` avec `WebTestClient`
 - Nommage : `{ClasseTestée}Test.java` pour unitaires, `{ClasseTestée}IT.java` pour intégration
-- **Toujours lancer Maven avec les profils `app-dependencies,webapp`** (ex : `mvn -P app-dependencies,webapp test`), sinon :
+- Mockito est en mode strict : une nouvelle dépendance injectée dans un service demande un stub (ou `lenient`) dans les tests existants
+- Pour surcharger un stub défini dans `setUp`, utiliser `doReturn(...).when(mock).méthode(...)` : un `when(...)` rappelle le stub existant et peut lever une exception
+- `findById` est ambigu (entier ou publisher) : utiliser `any(Integer.class)` dans les stubs
+- Un test d'intégration en échec doit être comparé à l'état d'origine avant de l'attribuer à la modification ; s'il échouait déjà, le signaler sans le corriger hors périmètre
+- **Toujours lancer Maven avec les profils `app-dependencies,webapp`** (ex : `mvn -P app-dependencies,webapp test`), et sous PowerShell mettre les propriétés `-D` entre guillemets (ex : `"-Dtest=!MonTestIT"`), sinon :
     - le profil `app-dependencies` (ce pom) n'étant pas actif par défaut, les dépendances internes manquent à la compilation ;
     - le profil `definition` du parent `fr.nutriset:api`, actif par défaut (`activeByDefault`), force `<skip>true</skip>` sur `testCompile` (utilisé pour publier un jar « définition » sans tests) — seule l'activation explicite du profil `webapp` du parent le désactive.
 
@@ -183,6 +197,7 @@ L'API est la **seule source de vérité** : le catalogue des permissions et leur
 - La conversion du jeton (claim `roles` → autorités) et la validation du catalogue au démarrage sont fournies par le module commun d'autorisation (`aad-resource-server`) : ne pas les réimplémenter. Les rôles ne sont **jamais** manipulés dans le code de l'API.
 - Les routes se verrouillent par permission avec `@PreAuthorize` sur la méthode du contrôleur (ex : `hasAuthority('xxx:write')`), jamais par rôle (`hasRole`). Toute nouvelle route métier doit porter un verrou explicite : sans annotation, elle reste ouverte à tout utilisateur authentifié.
 - Une nouvelle permission = au moins un rôle qui l'accorde dans la configuration, sinon l'application refuse de démarrer.
+- **Avant d'ajouter une permission, demander systématiquement à l'utilisateur** s'il faut réutiliser une permission existante (en proposer une si elle est pertinente) ou en créer une nouvelle.
 - **Toute nouvelle permission doit toujours être ajoutée dans le dépôt de configuration**, sous `configuration/spring-config/spring/static/<app-name>/application-{dev,test,prod}.yml` (ex : `static/api-controle-gestion/`), clé `spring.security.oauth2.resourceserver.authorization.roles`. Il s'agit d'ajouter la permission **à la liste des rôles** concernés (`AllAdmin`, `PnlAdmin`, etc. sont des rôles, pas des permissions), dans les trois fichiers d'environnement. Ne jamais la déclarer ailleurs (code, `src/main/resources`, fichiers `generated/`). Toute évolution du code qui introduit une permission doit donc s'accompagner de la modification correspondante dans le dépôt `configuration`.
 - Le nom d'une permission est le contrat avec la SPA : ne pas le renommer sans coordination.
 - `403` si la permission manque (journalisé avec l'identifiant d'appelant, la route et les rôles), `401` si jeton absent, expiré ou audience invalide.

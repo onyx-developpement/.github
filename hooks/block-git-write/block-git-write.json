@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/block-git-write.ps1",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

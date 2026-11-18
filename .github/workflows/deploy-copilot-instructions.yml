@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'copilot-instructions/**'
+      - 'skills/**'
+      - 'hooks/**'
+      - 'domains/**'
+      - 'scripts/Deploy-CopilotInstructions.ps1'
   workflow_dispatch:
     inputs:
       team:
@@ -35,10 +39,10 @@ jobs:
         shell: bash
         run: |
           changed=$(git diff --name-only HEAD^ HEAD)
-          # Fichier racine modifié : valeur vide = toutes les équipes
-          if echo "$changed" | grep -qx 'copilot-instructions/copilot-instructions.md'; then
+          # Fichier racine, skills ou script modifié : valeur vide = toutes les équipes
+          if echo "$changed" | grep -qE '^(copilot-instructions/copilot-instructions\.md|skills/|hooks/|domains/|scripts/Deploy-CopilotInstructions\.ps1)'; then
             teams=""
-            echo "Fichier racine modifie : toutes les equipes"
+            echo "Fichier commun, skill ou script modifie : toutes les equipes"
           else
             teams=$(echo "$changed" \
               | { grep '^copilot-instructions/[^/]*/' || true; } \

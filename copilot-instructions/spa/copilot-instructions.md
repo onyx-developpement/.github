@@ -2,7 +2,7 @@
 
 ## Stack technique
 
-- **React 18+**
+- **React 19**
 - **TypeScript** (strict mode activé)
 - **Vite** (bundler)
 - Gestion d'état : mécanismes natifs React — `useState`, `useContext` (pas de librairie externe)
@@ -46,11 +46,22 @@ src/
 - Utiliser `@fluentui/react-icons` pour les icônes
 - Respecter le thème Fluent UI — pas de styles CSS inline qui court-circuitent le design system
 
+## Services et contrat d'API
+
+- Un appel API se déclare dans `service/` en trois endroits : la classe décorée qui décrit l'appel (méthode HTTP, paramètres), la couche métier qui construit les DTO, et le mock. Les trois suivent le contrat de l'API : un champ ou un paramètre renommé côté API l'est partout.
+- Le mock reproduit les règles de l'API (identifiants, validations, messages), sinon la SPA se comporte autrement en mode maquette.
+- Un champ n'est optionnel dans un type que si l'API peut réellement l'omettre, pas pour éviter de corriger des objets de test.
+- Une requête de mise à jour qui remplace l'état existant renseigne explicitement chaque champ : un oubli ferait perdre la valeur.
+- Une erreur d'API a la forme `{ status, error: { message } }` : réutiliser l'utilitaire existant d'extraction du premier message.
+- Supprimer une page supprime aussi sa route, son entrée de menu, ses icônes devenues inutiles et sa mention dans `docs/securite-roles.md`.
+
 ## Tests
 
 - Tester le comportement, pas l'implémentation
 - Utiliser `screen.getByRole`, `screen.getByText` (pas `getByTestId` en priorité)
 - Nommage : `{Composant}.test.tsx`
+- Toute fonction pure ajoutée ou modifiée dans `model/` (arbres, calculs, validations) a son test Vitest
+- Vérifier avec `npx tsc -b`, `npx vitest run` et `npx oxlint src`. Le code existant produit déjà des avertissements de lint : ne pas en ajouter, ne pas corriger ceux qui sont hors périmètre
 
 ## Sécurité
 

@@ -1,0 +1,24 @@
+{
+  "folders": [
+    { "name": "api-controle-gestion", "path": "../../API Backend/api-controle-gestion" },
+    { "name": "spa-controle-gestion-react", "path": "../../SPA/spa-controle-gestion-react" },
+    { "name": "configuration", "path": "../../TransverseSI/configuration" },
+    { "name": "debezium-cdc", "path": "../../TransverseSI/debezium-cdc" },
+    { "name": "WK_BRONZE_SILVER_INGESTION", "path": "../../Data/WK_BRONZE_SILVER_INGESTION" },
+    { "name": "WK_GOLD_COMMON", "path": "../../Data/WK_GOLD_COMMON" },
+    { "name": "WK_GOLD_SEMANTIC_MODELS", "path": "../../Data/WK_GOLD_SEMANTIC_MODELS" },
+    { "name": ".github (organisation)", "path": ".." }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/target": true,
+      "**/node_modules": true
+    },
+    "search.exclude": {
+      "**/target": true,
+      "**/node_modules": true,
+      "**/.stubs": true
+    }
+  }
+}

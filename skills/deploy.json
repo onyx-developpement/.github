@@ -1,0 +1,3 @@
+{
+  "schema-change-end-to-end": { "topics": ["api", "spa", "data", "config"] }
+}
