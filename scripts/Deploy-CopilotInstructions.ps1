@@ -60,23 +60,23 @@ $script:TargetFile = ".github/copilot-instructions.md"
 $script:TemplateDir = if ($Env:GITHUB_WORKSPACE) {
     Join-Path $Env:GITHUB_WORKSPACE "copilot-instructions"
 } else {
-    Join-Path $PSScriptRoot ".." "copilot-instructions"
+    Join-Path (Join-Path $PSScriptRoot "..") "copilot-instructions"
 }
 $script:RootTemplate = Join-Path $script:TemplateDir "copilot-instructions.md"
 $script:SkillsDir = if ($Env:GITHUB_WORKSPACE) {
     Join-Path $Env:GITHUB_WORKSPACE "skills"
 } else {
-    Join-Path $PSScriptRoot ".." "skills"
+    Join-Path (Join-Path $PSScriptRoot "..") "skills"
 }
 $script:HooksDir = if ($Env:GITHUB_WORKSPACE) {
     Join-Path $Env:GITHUB_WORKSPACE "hooks"
 } else {
-    Join-Path $PSScriptRoot ".." "hooks"
+    Join-Path (Join-Path $PSScriptRoot "..") "hooks"
 }
 $script:DomainsDir = if ($Env:GITHUB_WORKSPACE) {
     Join-Path $Env:GITHUB_WORKSPACE "domains"
 } else {
-    Join-Path $PSScriptRoot ".." "domains"
+    Join-Path (Join-Path $PSScriptRoot "..") "domains"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -197,6 +197,8 @@ function Get-ManifestFiles {
             Write-GHALog 'warning' "Ressource introuvable : $dir"
             continue
         }
+        # Chemin normalise (sans ..) pour que le calcul du chemin relatif concorde avec FullName
+        $dir    = (Resolve-Path $dir).Path
         $prefix = if ($IncludeName) { "$TargetRoot/$($entry.Name)" } else { $TargetRoot }
         foreach ($file in Get-ChildItem $dir -Recurse -File) {
             $relative = $file.FullName.Substring($dir.Length + 1) -replace '\\', '/'
@@ -259,7 +261,7 @@ if ($script:IsGHA) { $summary.Add("| Depot | Equipe | Statut |") ; $summary.Add(
 $teamsOfRepo = @{}
 
 foreach ($slug in $slugs) {
-    $template = Join-Path $script:TemplateDir $slug "copilot-instructions.md"
+    $template = Join-Path (Join-Path $script:TemplateDir $slug) "copilot-instructions.md"
 
     if ($script:IsGHA) { Write-Output "::group::Equipe : $slug" }
     else               { Write-Output ""; Write-Output "=== Equipe : $slug ===" }
@@ -337,4 +339,5 @@ if ($script:IsGHA -and $Env:GITHUB_STEP_SUMMARY) {
     }
 }
 
-exit ($totalFail -gt 0 ? 1 : 0)
+if ($totalFail -gt 0) { exit 1 }
+exit 0
