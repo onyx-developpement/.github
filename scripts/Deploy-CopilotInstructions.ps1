@@ -113,34 +113,44 @@ function Deploy-ToRepo {
         return $true
     }
 
-    $encoded        = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
+    $encoded     = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
+    $maxAttempts = 4
 
-    # SHA requis si le fichier existe déjà (sinon 409 Conflict)
-    $existing = gh api "repos/$Repo/contents/$TargetPath" 2>$null | ConvertFrom-Json
-    $sha      = if ($existing -and $existing.sha) { $existing.sha } else { $null }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        # SHA requis si le fichier existe déjà (sinon 409 Conflict)
+        $existing = gh api "repos/$Repo/contents/$TargetPath" 2>$null | ConvertFrom-Json
+        $sha      = if ($existing -and $existing.sha) { $existing.sha } else { $null }
 
-    if ($existing -and $existing.content) {
-        $current = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($existing.content -replace '\s', '')))
-        if (($current -replace "`r`n", "`n").Trim() -eq ($Content -replace "`r`n", "`n").Trim()) {
-            Write-Host "  [=] $Repo ($TargetPath inchange)"
+        if ($existing -and $existing.content) {
+            $current = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($existing.content -replace '\s', '')))
+            if (($current -replace "`r`n", "`n").Trim() -eq ($Content -replace "`r`n", "`n").Trim()) {
+                Write-Host "  [=] $Repo ($TargetPath inchange)"
+                return $true
+            }
+        }
+
+        $body = @{ message = $CommitMessage; content = $encoded }
+        if ($sha) { $body.sha = $sha }
+
+        $bodyJson = $body | ConvertTo-Json -Compress
+        $out = $bodyJson | gh api "repos/$Repo/contents/$TargetPath" --method PUT --input - 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            $verb = if ($sha) { "mis a jour" } else { "cree" }
+            Write-Host "  [OK] $Repo ($TargetPath $verb)"
             return $true
         }
-    }
 
-    $body = @{ message = $CommitMessage; content = $encoded }
-    if ($sha) { $body.sha = $sha }
+        # 409 "is at X but expected Y" : la branche a bougé entre la lecture et l'écriture → on relit puis on réessaie
+        if ("$out" -match 'is at [0-9a-f]{40} but expected' -and $attempt -lt $maxAttempts) {
+            Start-Sleep -Seconds (2 * $attempt)
+            continue
+        }
 
-    $bodyJson = $body | ConvertTo-Json -Compress
-    $out = $bodyJson | gh api "repos/$Repo/contents/$TargetPath" --method PUT --input - 2>&1
-
-    if ($LASTEXITCODE -eq 0) {
-        $verb = if ($sha) { "mis a jour" } else { "cree" }
-        Write-Host "  [OK] $Repo ($TargetPath $verb)"
-        return $true
-    } else {
         Write-GHALog 'error' "[ERREUR] $Repo ($TargetPath) : $out"
         return $false
     }
+    return $false
 }
 
 # Dépôts non archivés de l'organisation avec leurs topics (nom complet -> topics) ; le dépôt .github, source des déploiements, est exclu

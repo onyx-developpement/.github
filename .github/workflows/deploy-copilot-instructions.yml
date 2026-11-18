@@ -23,6 +23,10 @@ on:
           - 'maven'
           - 'npm'
 
+concurrency:
+  group: deploy-copilot-instructions
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
