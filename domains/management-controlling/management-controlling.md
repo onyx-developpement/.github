@@ -1,26 +1,27 @@
 # Domaine management-controlling (P&L) : contrat transverse
 
-État au 2026-11-18. Ce document décrit ce qui est vrai pour ce domaine ; la procédure générale est dans le skill `schema-change-end-to-end`. À mettre à jour quand le domaine évolue.
+État au 2026-11-19. Ce document décrit ce qui est vrai pour ce domaine ; la procédure générale est dans le skill `schema-change-end-to-end`. À mettre à jour quand le domaine évolue.
 
 ## Chaîne de données
 
 | Étape | Où | Éléments |
 |---|---|---|
-| Base | dépôt `api-controle-gestion`, Flyway `src/main/resources/databases/migration/azure/postgresql/management-controlling/` | `pnl_common_label`, `pnl_common_label_code`, `pnl_deposit`, `pnl_deposit_line`, `pnl_sequence`, `subsidiary`, `subsidiary_currency`, `pnl_subsidiary_label`, `debezium_signals` |
+| Base | dépôt `api-controle-gestion`, Flyway `src/main/resources/databases/migration/azure/postgresql/management-controlling/` | `pnl_common_label`, `pnl_common_label_code`, `pnl_deposit`, `pnl_deposit_line`, `pnl_sequence`, `subsidiary`, `pnl_subsidiary_currency`, `pnl_exchange_rate`, `pnl_subsidiary_label`, `debezium_signals` |
 | Réplication | dépôt `debezium-cdc`, `connectors/management-controlling/application-{test,prod}.properties` | liste `debezium.source.table.include.list` ; signaux dans `public.debezium_signals` |
-| Bronze vers silver | dépôt `configuration`, `spring-config/fabric/static/NB_BRONZE_TO_SILVER-management-controlling/application-{test,prod}.yaml` | `LH_SILVER`, schéma `management_controlling` : `PNL_COMMON_LABELS`, `PNL_DEPOSITS`, `PNL_DEPOSIT_LINES`, `PNL_SUBSIDIARY_LABELS`, `PNL_SEQUENCES` |
+| Bronze vers silver | dépôt `configuration`, `spring-config/fabric/static/NB_BRONZE_TO_SILVER-management-controlling/application-{test,prod}.yaml` | `LH_SILVER`, schéma `management_controlling` : `PNL_COMMON_LABELS`, `PNL_DEPOSITS`, `PNL_DEPOSIT_LINES`, `PNL_SUBSIDIARY_LABELS`, `PNL_SEQUENCES`, `PNL_SUBSIDIARY_CURRENCIES`, `PNL_EXCHANGE_RATES` |
 | Gold (configuration) | dépôt `configuration`, `spring-config/fabric/static/NB_GOLD_COMMON_DIMENSIONS/` et `NB_GOLD_COMMON_FACTS/` | `LH_GOLD_COMMON` : dimensions dans le schéma `dimensions`, faits dans `facts` ; chaque dimension a une table `_active` |
 | Gold (moteur) | dépôt `WK_GOLD_COMMON`, `NOTEBOOK/NB_DIMENSIONS.Notebook` et `NB_FACTS.Notebook` | pilotés par les YAML ci-dessus |
 | Modèle sémantique | dépôt `WK_GOLD_SEMANTIC_MODELS`, `SEMANTIC MODEL/SM_MANAGEMENT_CONTROLLING.SemanticModel` | Direct Lake sur `LH_GOLD_COMMON` |
 
-Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniquement ; les fichiers de production ne le sont pas.
+Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniquement ; les fichiers de production ne le sont pas. Le silver de production lit encore `eur_exchange_rate` (colonne supprimée de `pnl_deposit`) et ne réplique pas les tables de devises et de taux : l'adapter avant de déployer la migration en production.
 
 ## Tables Gold du P&L
 
-- **Dimensions :** `DimPnlCommonLabel`, `DimPnlSequence`, `DimPnlHeader`, `DimPnlPresentation`, `DimPnlReferenceSelector`, et `DimSubsidiaryPnl` conservée pour le modèle sémantique (son `PnlType` est reconstitué par jointure entre en-tête et séquence).
+- **Dimensions :** `DimPnlCommonLabel`, `DimPnlSequence`, `DimPnlHeader`, `DimPnlPresentation`, `DimPnlReferenceSelector`, `DimPnlSubsidiaryCurrency`, `DimPnlExchangeRate`, `DimPnlEffectiveExchangeRate`, `DimPnlPresentationCurrency`, et `DimSubsidiaryPnl` conservée pour le modèle sémantique (son `PnlType` est reconstitué par jointure entre en-tête et séquence).
 - **Faits bruts :** `FactSubsidiaryPnlLine`, `FactSubsidiaryPnlLineThreeYearsPlan`.
 - **Faits de présentation :** `FactPnlPresentationLine`, `FactPnlPresentationThreeYearsPlan`, `FactPnlPresentationLanding`.
-- **Ordre de traitement :** dimensions de base (ordre 0), puis dimensions par requête (ordre 100) ; faits de présentation (ordre 100), puis atterrissage (ordre 110), car il s'appuie sur les lignes mensuelles.
+- **Ordre de traitement :** dimensions de base (ordre 0), puis dimensions par requête (ordre 100, dont les taux effectifs) ; faits de présentation (ordre 100), puis atterrissage (ordre 110), car il s'appuie sur les lignes mensuelles.
+- **Montants :** les faits bruts portent le montant dans la devise du dépôt ; les faits de présentation portent `Amount` (devise du dépôt) et `ConvertedAmount` (avec `NumeratorConvertedAmount` et `DenominatorConvertedAmount` pour les pourcentages), par `RateType` (sauf le plan à trois ans) et `PresentationCurrency`.
 
 ## Règles métier à respecter
 
@@ -30,6 +31,9 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - Les lignes calculées (totaux, marges, pourcentages) sont des libellés communs marqués `IS_CALCULATED`, avec un code obligatoire et sans enfant. Elles ne reçoivent jamais de montant : leurs formules sont dans le Gold (`calculated_lines` de `FactPnlPresentationLine` et du plan à trois ans). Une ligne en pourcentage stocke numérateur et dénominateur ; le ratio se calcule à la lecture sur l'agrégat.
 - Les libellés communs ont une hiérarchie de trois niveaux au plus. Le code de présentation est le code du libellé, ou `LABEL_<id>` s'il n'en a pas.
 - Les montants de coûts sont saisis en positif ; les formules les soustraient.
+- Les devises sont paramétrées par filiale (`pnl_subsidiary_currency`, une ligne par filiale) : devise transactionnelle, devise fonctionnelle (celle des dépôts, imposée par l'API) et deux devises de présentation (EUR et USD par défaut). Un dépôt porte sa devise (`currency_code`) et n'a plus de taux de change.
+- Les taux (`pnl_exchange_rate`) sont mensuels, en base EUR (1 EUR = taux × devise), avec un taux moyen et un taux de clôture. `subsidiary_id` vide : taux commun ; renseigné : taux spécifique à la filiale, prioritaire. L'API refuse un dépôt dont un taux manque (devise du dépôt et devises de présentation hors EUR, 12 mois de l'année, N+1 à N+3 pour un plan annuel) et la suppression d'un taux dont un dépôt dépend.
+- Conversion dans le Gold : `AVERAGE` = taux moyen du mois ; `CLOSING` = taux de clôture du mois pour la séquence `REAL`, taux moyen pour les autres ; `CONSTANT` = moyenne annuelle des taux moyens de l'année précédente (absent s'il manque un mois). Le plan à trois ans utilise la moyenne annuelle. Un montant dont un taux manque n'est pas produit : les lignes calculées le compteraient à 0 sinon.
 - L'atterrissage d'une séquence `IS_LANDING` prend les mois réels (jusqu'à `RealMonthCount`) dans la dernière version de `REAL`, et les mois suivants dans la dernière version de la séquence. La séquence réelle est identifiée par son code `REAL`.
 
 ## Contrat API et SPA
@@ -40,6 +44,7 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - `CommonLabelDTO` : `calculated`, `percentage`, `accentuated`.
 - `PUT /pnl/deposits/{uuid}/latest-version` pose le marqueur de dernière version.
 - Permissions : `common-label-codes:write` pour les séquences et les libellés calculés, `deposit:lock` pour la dernière version.
+- `DepositDTO` ne porte plus de taux de change. Devises d'une filiale : `GET`/`PUT /pnl/subsidiaries/{id}/currencies` (`SubsidiaryCurrencyDTO`). Taux communs : `GET /pnl/exchange-rates?currencyCode=&year=`, `PUT /pnl/exchange-rates/{code}/{year}`. Taux spécifiques : `GET`/`PUT /pnl/subsidiaries/{id}/exchange-rates[/{code}/{year}]`. Taux manquants d'une filiale : `GET /pnl/subsidiaries/{id}/exchange-rates/missing?pnlSequenceId=&year=` (`MissingExchangeRateDTO`). Lecture : `deposit:read` ; écriture : `subsidiaries:write`.
 
 ## Points sensibles
 
@@ -50,3 +55,4 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - **Séquences absentes du silver :** `FactPnlPresentationLanding` perd les lignes réelles et `DimPnlScenario` du modèle ne propose qu'une séquence.
 - **Modèle sémantique :** une table de partition « calculée » ne peut pas devenir Direct Lake dans la même synchronisation Git. Il faut supprimer les tables concernées (et les mesures qui en dépendent), synchroniser, puis les restaurer et synchroniser de nouveau. Le modèle garde les noms de tables et de mesures pour ne pas casser les rapports.
 - **Relations du modèle :** seul `FactPnlPresentationLanding` est relié à `DimPnlScenario`. Les comparaisons lisent `FactPnlPresentationLine` filtré par `DimSubsidiaryPnl_active[PnlType]` et `[VersionCode]`, ou par `DimPnlHeader_active[IsLatestVersion]` pour `LATEST`.
+- **Conversion côté modèle :** `PnlRateTypeSelector` (table calculée) et `PnlPresentationCurrencySelector` sont déconnectés ; les mesures `Selected Rate Type` et `Selected Presentation Currency` retiennent `AVERAGE` et `EUR` sans choix unique, et filtrent `RateType` et `PresentationCurrency` des faits. `Actual N-1` et `YN-1` restent au taux moyen quand `CONSTANT` est choisi. Les faits sont reconstruits en entier : un taux modifié se répercute à la prochaine exécution des faits.
