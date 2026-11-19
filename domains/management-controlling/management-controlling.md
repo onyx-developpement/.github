@@ -17,14 +17,17 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 
 ## Tables Gold du P&L
 
-- **Dimensions :** `DimPnlCommonLabel`, `DimPnlSequence`, `DimPnlHeader`, `DimPnlPresentation`, `DimPnlReferenceSelector`, `DimPnlSubsidiaryCurrency`, `DimPnlExchangeRate`, `DimPnlEffectiveExchangeRate`, `DimPnlPresentationCurrency`, et `DimSubsidiaryPnl` conservée pour le modèle sémantique (son `PnlType` est reconstitué par jointure entre en-tête et séquence).
-- **Faits bruts :** `FactSubsidiaryPnlLine`, `FactSubsidiaryPnlLineThreeYearsPlan`.
+- **Dimensions :** `DimPnlCommonLabel`, `DimPnlSequence`, `DimPnlHeader`, `DimPnlPresentation`, `DimPnlReferenceSelector`, `DimPnlSubsidiaryCurrency`, `DimPnlExchangeRate`, `DimPnlEffectiveExchangeRate`, `DimPnlPresentationCurrency`, `DimPnlErpSubsidiary`, `DimPnlErpAccountMapping`, et `DimSubsidiaryPnl` conservée pour le modèle sémantique (son `PnlType` est reconstitué par jointure entre en-tête et séquence).
+- **Faits bruts :** `FactSubsidiaryPnlLine`, `FactSubsidiaryPnlLineThreeYearsPlan`, `FactErpPnlLine` (grand livre M3 rattaché aux filiales ERP).
 - **Faits de présentation :** `FactPnlPresentationLine`, `FactPnlPresentationThreeYearsPlan`, `FactPnlPresentationLanding`.
-- **Ordre de traitement :** dimensions de base (ordre 0), puis dimensions par requête (ordre 100, dont les taux effectifs) ; faits de présentation (ordre 100), puis atterrissage (ordre 110), car il s'appuie sur les lignes mensuelles.
+- **Ordre de traitement :** dimensions de base (ordre 0), puis dimensions par requête (ordre 100, dont les taux effectifs) ; `DimPnlHeader` (dimension par requête) et `FactErpPnlLine` sont à l'ordre 50 : l'en-tête dépend des devises et des filiales ERP, les taux effectifs de l'en-tête ; faits de présentation (ordre 100), puis atterrissage (ordre 110), car il s'appuie sur les lignes mensuelles.
 - **Montants :** les faits bruts portent le montant dans la devise du dépôt ; les faits de présentation portent `Amount` (devise du dépôt) et `ConvertedAmount` (avec `NumeratorConvertedAmount` et `DenominatorConvertedAmount` pour les pourcentages), par `RateType` (sauf le plan à trois ans) et `PresentationCurrency`.
 
 ## Règles métier à respecter
 
+- **Réel alimenté par l'ERP :** le réel des filiales `E100000` (division B00), `E150000` (C00), `E200000` et `E250000` (A00, réparties par centre comptable dans `DimPnlErpSubsidiary`) vient du grand livre M3 (`FactGeneralLedger`), pas des dépôts de la SPA. `DimPnlHeader` porte un en-tête par filiale ERP et année : séquence `REAL`, version `ERP-<année>`, dernière version, devise fonctionnelle saisie dans la SPA, identifiant négatif (`-(numéro de filiale × 10000 + année)`) pour ne jamais rencontrer celui d'un dépôt. Sans devise fonctionnelle dans la SPA, la filiale n'a pas d'en-tête.
+- `FactErpPnlLine` reprend les comptes de classe 6 et 7 : montant `ThirdPartyCurrencyAmount` signé par `DimPnlErpAccountMapping` (mapping provisoire par préfixe de compte, le plus long l'emporte), écriture de clôture d'exercice exclue (`AccountingText` commençant par `CLOTURE EXERCICE`). Une ligne non reprise porte `RejectionReason` : `ACCOUNT_NOT_MAPPED`, `NO_HEADER` ou `CURRENCY_MISMATCH` (devise tiers différente de la devise fonctionnelle de la SPA).
+- `FactPnlPresentationLine` ajoute les lignes ERP retenues et ignore les dépôts `REAL` de la SPA des filiales ERP, qui restent en base. L'API refuse tout dépôt `REAL` d'une filiale dont `realDepositBlocked` est vrai.
 - Un dépôt (`pnl_deposit`) référence sa séquence par `pnl_sequence_id` (clé de `pnl_sequence`). Le code de séquence (`BUDGET`, `REAL`, `SPRING_FORECAST`, `SUMMER_FORECAST`, `FALL_FORECAST`, `THREE_YEARS_PLAN`) reste la clé naturelle, mais n'est plus stocké dans le dépôt.
 - Une séquence porte `REAL_MONTH_COUNT`, `COMPARISON_MONTH_COUNT`, `IS_LANDING` et `IS_ANNUAL`. Les lignes d'un plan à trois ans sont annuelles, sans mois ; l'année du dépôt est l'année de référence N.
 - La dernière version est un marqueur `IS_LATEST_VERSION`, unique par (filiale, séquence, année), posé depuis l'application. Sans séquence sélectionnée, la lecture retient `BUDGET`.
@@ -43,7 +46,8 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - `PnlSequenceDTO` expose `id` en lecture seule ; routes `/pnl/sequences` (création, modification, suppression par code).
 - `CommonLabelDTO` : `calculated`, `percentage`, `accentuated`.
 - `PUT /pnl/deposits/{uuid}/latest-version` pose le marqueur de dernière version.
-- Permissions : `common-label-codes:write` pour les séquences et les libellés calculés, `deposit:lock` pour la dernière version.
+- Permissions : `common-label-codes:write` pour les séquences et les libellés calculés, `deposit:lock` pour la dernière version, `real-deposit-source:write` pour le blocage du réel d'une filiale.
+- `SubsidiaryDTO.realDepositBlocked` (colonne `subsidiary.real_deposit_blocked`) ; `PUT /pnl/subsidiaries/{id}/real-deposits/block` et `/allow`.
 - `DepositDTO` ne porte plus de taux de change. Devises d'une filiale : `GET`/`PUT /pnl/subsidiaries/{id}/currencies` (`SubsidiaryCurrencyDTO`). Taux communs : `GET /pnl/exchange-rates?currencyCode=&year=`, `PUT /pnl/exchange-rates/{code}/{year}`. Taux spécifiques : `GET`/`PUT /pnl/subsidiaries/{id}/exchange-rates[/{code}/{year}]`. Taux manquants d'une filiale : `GET /pnl/subsidiaries/{id}/exchange-rates/missing?pnlSequenceId=&year=` (`MissingExchangeRateDTO`). Lecture : `deposit:read` ; écriture : `subsidiaries:write`.
 
 ## Points sensibles
