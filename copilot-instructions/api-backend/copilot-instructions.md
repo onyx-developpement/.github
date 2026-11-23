@@ -163,6 +163,25 @@ fabric:
 - Un champ en lecture seule (identifiant, horodatage, indicateur calculé) est mappé en lecture uniquement et ignoré à l'écriture.
 - Un champ ajouté à un DTO est ajouté dans chaque sens du mapper qui le concerne ; un champ figé après création n'entre pas dans le mapping de mise à jour.
 
+## Paramétrage métier
+
+- Un paramètre que les utilisateurs métier doivent pouvoir modifier (taux, libellés, seuils, listes de valeurs) n'est ni en dur ni dans la configuration : il est porté par une **table Flyway**, exposé par des **endpoints** de l'API (lecture et écriture, chacun avec sa permission) et modifié depuis un **écran de la SPA**
+- La configuration (depôt `configuration`) ne porte que ce qui varie par environnement : URLs, identifiants d'infrastructure, correspondance rôle → permissions
+- Détail et checklist : skill `spa-api-end-to-end`
+
+## Orchestration et modèles partagés
+
+- L'API métier **orchestre** les `api-proxy-*` : le service les appelle et assemble le résultat, la SPA ne parle qu'à l'API métier
+- Le pattern `repository/IApiXxx` ci-dessus ne s'applique qu'au proxy d'une application externe ; un `api-proxy-*` interne s'utilise par son interface `definition/IApiProxyXxx`
+- Un modèle utilisé par plusieurs APIs va dans `fr.nutriset.components:commons` (montée de version, puis mise à jour du BOM). Les modèles JSON propres à la SPA restent dans la SPA
+- Un besoin technique absent du socle (gestion des erreurs, sécurité, logging, client) se corrige dans le dépôt Maven concerné avec montée de version, pas par un contournement dans l'API
+
+## Documentation
+
+- Le README de l'API est structuré : description, endpoint → permission, proxies appelés, clés de configuration, tables Flyway, lancement en local
+- Chaque endpoint porte `@Operation` ; tout ajout d'endpoint, de permission, de clé de configuration ou de table met à jour le README dans la même modification
+- Le contrat du domaine métier (dépôt `.github`, `domains/`) reste la référence transverse : voir le skill `spa-api-end-to-end`
+
 ## Gestion des erreurs
 
 - Utiliser `onErrorResume`, `onErrorMap`, `onErrorReturn` dans les chaînes réactives

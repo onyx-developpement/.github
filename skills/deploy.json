@@ -1,3 +1,4 @@
 {
-  "schema-change-end-to-end": { "topics": ["api", "spa", "data", "config"] }
+  "schema-change-end-to-end": { "topics": ["api", "spa", "data", "config"] },
+  "spa-api-end-to-end": { "topics": ["api", "spa", "config", "maven", "npm"] }
 }

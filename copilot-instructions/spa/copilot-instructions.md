@@ -95,6 +95,18 @@ Règles :
 - Ces verrous sont **cosmétiques**. L'autorisation effective est celle que l'API applique sur chaque route : toute nouvelle permission côté SPA suppose le verrou correspondant côté API (voir `docs/plan-securite-api.md`).
 - Mode maquette (`useMocks`) : `MockApiControleGestion.getMe()` accorde toutes les permissions. Pour tester un parcours restreint, modifier la liste renvoyée par ce mock.
 
+## Configuration
+
+- Seule `VITE_API_URL` est déclarée dans les fichiers `.env.*` ; tout le reste (MSAL, paramètres d'environnement) vient de l'API via `GET {VITE_API_URL}/frontend-config`
+- Un paramètre modifiable par les utilisateurs métier se lit et s'écrit par l'API (table + endpoints + écran), jamais dans une constante ou un fichier de la SPA
+- Un besoin technique transverse manquant (authentification, autorisation, appels REST, layout) se traite dans le socle `@nutriset/react` (nouvelle version npm), pas par un contournement dans l'application
+
+## Documentation
+
+- Toute nouvelle page ou fonctionnalité est documentée dans `docs/` (un fichier par fonctionnalité dans `docs/fonctionnalites/`) et référencée dans le README, qui reste structuré : description, lancement, configuration, liens vers `docs/`
+- Les permissions vont dans `docs/securite-roles.md`, le contrat d'API dans `docs/api.md`
+- Le skill `spa-api-end-to-end` décrit la démarche complète
+
 ## Format de réponse préféré
 
 Code TypeScript complet avec imports. Inclure les types explicitement. Pas de `any`.

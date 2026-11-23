@@ -27,6 +27,7 @@
 
 - Ne jamais faire de commit automatiquement : les commits doivent toujours être initiés explicitement par le développeur
 - Ne jamais pousser, réécrire l'historique ni supprimer une branche sans demande explicite
+- Ne jamais modifier la production (configuration, fichiers, déploiement) sans demande explicite, et le signaler dans le compte rendu
 
 ### Méthode de travail de Copilot
 
@@ -38,15 +39,22 @@
 - Relire un fichier avant de le modifier à nouveau : l'utilisateur ou un formateur a pu le changer entre deux demandes
 - Les recherches du workspace ne voient pas les dépôts voisins non ouverts : les lire en lecture seule avec le terminal, ou demander un workspace multi-racine
 - Une évolution qui traverse plusieurs dépôts (base, API, SPA, réplication, Gold, modèle sémantique) suit le skill `schema-change-end-to-end`
+- Créer ou faire évoluer une SPA et son API métier (fonctionnalité, écran, paramétrage, rattachement à un domaine métier) suit le skill `spa-api-end-to-end`
 - Un fichier de domaine (`domains/`) se modifie uniquement dans le dépôt `.github`, jamais dans les copies des autres dépôts : la GitHub Action les y déploie. Une fois l'action passée, un `git pull` dans le dépôt concerné suffit à récupérer la copie à jour
 - Fichiers temporaires dans un dossier temporaire hors du dépôt, supprimés en fin de tâche ; le signaler si la suppression échoue
 - Pas de document Markdown de synthèse non demandé. Un commentaire dit ce que le code ne montre pas, en une ligne, sans raconter la modification
 - Terminer par un compte rendu court : ce qui a changé, ce qui reste à faire à la main (déploiement, production, réplication), ce qui n'a pas été vérifié
 
-### Économie de contexte
+### Plan, modèle et contexte
 
+- Tout chantier commence par un **plan** validé avant la première modification, sauf un changement trivial limité à un seul fichier. Le plan découpe le travail en phases et indique pour chacune le modèle et la taille de contexte
+- Choix du modèle :
+  - **Opus** : conception, contrat d'API ou de données, arbitrage, débogage difficile
+  - **Sonnet** : implémentation (y compris sur plusieurs dépôts) et tests
+  - **Haiku** : documentation de textes déjà arrêtés, renommages mécaniques, montées de version
+- Choix du contexte : le plus petit qui suffit à la phase ; ouvrir une nouvelle session ou compacter plutôt que de traîner l'historique des phases précédentes
+- **Fin de phase** : annoncer qu'elle est terminée, indiquer le modèle et le contexte de la phase suivante, demander à l'utilisateur de changer de modèle et de lancer `/compact` (ou d'ouvrir une nouvelle session), et fournir le résumé de l'état à reprendre. Ne pas enchaîner la phase suivante avant sa réponse
+- Une tâche de documentation pure qui ne demande pas de comprendre le code se propose en une phrase dans une nouvelle session avec Haiku ; en cas de refus, continuer dans la session courante
 - Lire un fichier par plage de lignes, pas en entier ; ne pas relire un fichier déjà lu et inchangé
 - Borner toute sortie de terminal (`-First`, `Select-String`, colonnes utiles) ; ne jamais afficher un diff, un log ou une trace complets
 - Pour une exploration large (plusieurs fichiers ou dépôts), déléguer à un sous-agent qui ne renvoie qu'un résumé
-- À la fin de chaque phase d'un chantier long (base, API, SPA, Gold, contrat), proposer d'ouvrir une nouvelle session et de compacter, en fournissant le résumé de l'état à reprendre
-- Avant une tâche de documentation pure (Markdown, copie de textes déjà arrêtés), proposer en une phrase de la faire dans une nouvelle session avec un modèle plus léger, en fournissant le résumé à coller. Ne pas la lancer avant la réponse ; en cas de refus, continuer dans la session courante. Ne pas le proposer quand la documentation demande de comprendre le code

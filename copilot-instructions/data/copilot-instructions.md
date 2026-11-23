@@ -14,7 +14,6 @@
 - Les calculs métier (totaux, marges, pourcentages) se font dans le Gold, par configuration, jamais dans la SPA, l'API ni le modèle sémantique. Une ligne en pourcentage stocke numérateur et dénominateur ; le ratio se calcule à la lecture sur l'agrégat.
 - Les clés de substitution sont un hachage de `merge_key` : ne pas changer `merge_key` d'une dimension existante sans accord, cela change toutes ses SK.
 - Une source externe (non maîtrisée) n'est jamais modifiée ni suggérée comme à modifier : on ne change que la transformation.
-- Ne pas modifier les fichiers de production sans demande explicite, et le dire dans le compte rendu.
 
 ## Conventions notebooks PySpark
 
@@ -37,6 +36,12 @@
 - Utiliser des commentaires sur les colonnes (`COMMENT`) pour documenter le sens métier
 
 - Documenter les règles de qualité attendues en cellule Markdown
+
+## Documentation
+
+- Le contrat du domaine métier (dépôt `.github`, `domains/`) est la référence : toute modification de la chaîne de données ou des tables Gold y est reportée dans le même chantier
+- Mettre à jour le README du dépôt ou du workspace s'il existe
+- Chaque colonne et chaque mesure du modèle sémantique (TMDL) porte une description métier
 
 ## Sécurité
 
