@@ -1,6 +1,6 @@
 # Domaine management-controlling (P&L) : contrat transverse
 
-État au 2026-11-19. Ce document décrit ce qui est vrai pour ce domaine ; la procédure générale est dans le skill `schema-change-end-to-end`. À mettre à jour quand le domaine évolue.
+État au 2026-11-23. Ce document décrit ce qui est vrai pour ce domaine ; la procédure générale est dans le skill `schema-change-end-to-end`. À mettre à jour quand le domaine évolue.
 
 ## Chaîne de données
 
@@ -34,9 +34,10 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - Les lignes calculées (totaux, marges, pourcentages) sont des libellés communs marqués `IS_CALCULATED`, avec un code obligatoire et sans enfant. Elles ne reçoivent jamais de montant : leurs formules sont dans le Gold (`calculated_lines` de `FactPnlPresentationLine` et du plan à trois ans). Une ligne en pourcentage stocke numérateur et dénominateur ; le ratio se calcule à la lecture sur l'agrégat.
 - Les libellés communs ont une hiérarchie de trois niveaux au plus. Le code de présentation est le code du libellé, ou `LABEL_<id>` s'il n'en a pas.
 - Les montants de coûts sont saisis en positif ; les formules les soustraient.
+- Un libellé commun porte `is_monetary` (défaut vrai ; la migration V17 le met à faux pour `SALES_VOLUME`, volume en tonnes). Faux : jamais converti, son `ConvertedAmount` vaut `Amount` pour chaque type de taux et devise de présentation, et il n'est jamais omis faute de taux. Gold : `IsMonetary` dans `DimPnlCommonLabel` et `DimPnlPresentation`.
 - Les devises sont paramétrées par filiale (`pnl_subsidiary_currency`, une ligne par filiale) : devise transactionnelle, devise fonctionnelle (celle des dépôts, imposée par l'API) et deux devises de présentation (EUR et USD par défaut). Un dépôt porte sa devise (`currency_code`) et n'a plus de taux de change.
 - Les taux (`pnl_exchange_rate`) sont mensuels, en base EUR (1 EUR = taux × devise), avec un taux moyen et un taux de clôture. `subsidiary_id` vide : taux commun ; renseigné : taux spécifique à la filiale, prioritaire. L'API refuse un dépôt dont un taux manque (devise du dépôt et devises de présentation hors EUR, 12 mois de l'année, N+1 à N+3 pour un plan annuel) et la suppression d'un taux dont un dépôt dépend.
-- Conversion dans le Gold : `AVERAGE` = taux moyen du mois ; `CLOSING` = taux de clôture du mois pour la séquence `REAL`, taux moyen pour les autres ; `CONSTANT` = moyenne annuelle des taux moyens de l'année précédente (absent s'il manque un mois). Le plan à trois ans utilise la moyenne annuelle. Un montant dont un taux manque n'est pas produit : les lignes calculées le compteraient à 0 sinon.
+- Conversion dans le Gold : `AVERAGE` = taux moyen du mois ; `CLOSING` = taux de clôture du mois pour la séquence `REAL`, taux moyen pour les autres ; `CONSTANT` = moyenne annuelle des taux moyens de l'année précédente (absent s'il manque un mois). Le plan à trois ans utilise la moyenne annuelle. Un montant monétaire dont un taux manque n'est pas produit : les lignes calculées le compteraient à 0 sinon.
 - L'atterrissage d'une séquence `IS_LANDING` prend les mois réels (jusqu'à `RealMonthCount`) dans la dernière version de `REAL`, et les mois suivants dans la dernière version de la séquence. La séquence réelle est identifiée par son code `REAL`.
 
 ## Contrat API et SPA
@@ -44,7 +45,7 @@ Au moment de la rédaction, la configuration P&L est adaptée pour TEST uniqueme
 - Dépôts : `api-controle-gestion` (API Spring) et `spa-controle-gestion-react`.
 - `DepositDTO.pnlSequenceId` (entier) ; filtre `GET /pnl/deposits?pnlSequenceId=`.
 - `PnlSequenceDTO` expose `id` en lecture seule ; routes `/pnl/sequences` (création, modification, suppression par code).
-- `CommonLabelDTO` : `calculated`, `percentage`, `accentuated`.
+- `CommonLabelDTO` : `calculated`, `percentage`, `accentuated`, `monetary` (absent à la création = vrai).
 - `PUT /pnl/deposits/{uuid}/latest-version` pose le marqueur de dernière version.
 - Permissions : `common-label-codes:write` pour les séquences et les libellés calculés, `deposit:lock` pour la dernière version, `real-deposit-source:write` pour le blocage du réel d'une filiale.
 - `SubsidiaryDTO.realDepositBlocked` (colonne `subsidiary.real_deposit_blocked`) ; `PUT /pnl/subsidiaries/{id}/real-deposits/block` et `/allow`.
