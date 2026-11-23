@@ -38,6 +38,15 @@
 - Relire un fichier avant de le modifier à nouveau : l'utilisateur ou un formateur a pu le changer entre deux demandes
 - Les recherches du workspace ne voient pas les dépôts voisins non ouverts : les lire en lecture seule avec le terminal, ou demander un workspace multi-racine
 - Une évolution qui traverse plusieurs dépôts (base, API, SPA, réplication, Gold, modèle sémantique) suit le skill `schema-change-end-to-end`
+- Un fichier de domaine (`domains/`) se modifie uniquement dans le dépôt `.github`, jamais dans les copies des autres dépôts : la GitHub Action les y déploie. Une fois l'action passée, un `git pull` dans le dépôt concerné suffit à récupérer la copie à jour
 - Fichiers temporaires dans un dossier temporaire hors du dépôt, supprimés en fin de tâche ; le signaler si la suppression échoue
 - Pas de document Markdown de synthèse non demandé. Un commentaire dit ce que le code ne montre pas, en une ligne, sans raconter la modification
 - Terminer par un compte rendu court : ce qui a changé, ce qui reste à faire à la main (déploiement, production, réplication), ce qui n'a pas été vérifié
+
+### Économie de contexte
+
+- Lire un fichier par plage de lignes, pas en entier ; ne pas relire un fichier déjà lu et inchangé
+- Borner toute sortie de terminal (`-First`, `Select-String`, colonnes utiles) ; ne jamais afficher un diff, un log ou une trace complets
+- Pour une exploration large (plusieurs fichiers ou dépôts), déléguer à un sous-agent qui ne renvoie qu'un résumé
+- À la fin de chaque phase d'un chantier long (base, API, SPA, Gold, contrat), proposer d'ouvrir une nouvelle session et de compacter, en fournissant le résumé de l'état à reprendre
+- Avant une tâche de documentation pure (Markdown, copie de textes déjà arrêtés), proposer en une phrase de la faire dans une nouvelle session avec un modèle plus léger, en fournissant le résumé à coller. Ne pas la lancer avant la réponse ; en cas de refus, continuer dans la session courante. Ne pas le proposer quand la documentation demande de comprendre le code
