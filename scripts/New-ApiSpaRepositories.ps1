@@ -128,6 +128,7 @@ __WAF__
     groups_to_assign   = var.apis.api___UNDER__.oauth2.app_roles_groups
     api_identifier_uri = var.apis.api___UNDER__.oauth2.identifier_uri
     api_accesses = [{
+      name          = "api___UNDER__"
       api_client_id = var.apis.api___UNDER__.oauth2.application.client_id
       scope_ids     = [var.apis.api___UNDER__.oauth2.permission_scopes["all"].scope_id]
     }]
