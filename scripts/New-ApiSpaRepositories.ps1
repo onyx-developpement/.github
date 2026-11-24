@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 <#
+Phase 1 : cree les depots GitHub internes api-<name> et/ou spa-<name> (README, topics, equipe en ecriture).
 Phase 4 : ajoute les modules Terraform prod et test d'une application api-<name> et/ou spa-<name>
 dans azure-infrastructure, sur la branche yyyyMMdd-<name> depuis origin/main, puis ouvre la PR.
 #>
@@ -14,6 +15,8 @@ param(
 
     [string]$InfraPath = 'C:\dev\git\TransverseSI\azure-infrastructure',
 
+    [string]$GitHubOrg = 'onyx-developpement',
+
     # Exposition Fortiweb (demandee si absente) :
     # PartoutSaufOT = internet compris (calque wfp), InterneSaufOT = defauts du module (calque proxy-m3),
     # OTUniquement = calque mes.
@@ -23,7 +26,7 @@ param(
     # Affiche les modifications sans rien ecrire ni committer.
     [switch]$DryRun,
 
-    # Committe la branche sans push ni PR.
+    # Committe la branche sans push ni PR, et ne cree rien sur GitHub.
     [switch]$NoPublish
 )
 
@@ -175,6 +178,46 @@ function Write-Change([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text, $utf8)
 }
 
+function Test-GitHubRepo([string]$FullName) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $out = gh api "repos/$FullName" --silent 2>&1 | Out-String } finally { $ErrorActionPreference = $previous }
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if ($out -match 'HTTP 404') { return $false }
+    throw "Verification de $FullName impossible : $out"
+}
+
+# Idempotent : cree le depot s'il manque, puis force equipe (push) et topics.
+function Initialize-GitHubRepo {
+    param([string]$Repo, [string]$TeamSlug, [string[]]$Topics)
+    $full = "$GitHubOrg/$Repo"
+    $exists = Test-GitHubRepo $full
+    if ($DryRun) {
+        $state = if ($exists) { 'existe deja' } else { 'a creer (internal, README)' }
+        Write-Host "[DryRun] GitHub $full : $state ; equipe $TeamSlug=push ; topics $($Topics -join ',')"
+        return
+    }
+    if ($exists) {
+        Write-Host "[Ignore] Depot $full deja present"
+    }
+    else {
+        gh repo create $full --internal --add-readme | Out-Null
+        Assert-Native "gh repo create $full"
+        Write-Host "[GitHub] Depot $full cree"
+    }
+
+    gh api -X PUT "orgs/$GitHubOrg/teams/$TeamSlug/repos/$full" -f permission=push --silent
+    Assert-Native "attribution de l'equipe $TeamSlug sur $full"
+    $permission = gh api "orgs/$GitHubOrg/teams/$TeamSlug/repos/$full" -H 'Accept: application/vnd.github.v3.repository+json' -q '.role_name'
+    Assert-Native "verification de l'equipe $TeamSlug sur $full"
+    if ($permission -notin 'write', 'maintain', 'admin') { throw "L'equipe $TeamSlug n'a pas l'acces en ecriture sur $full (role : $permission)" }
+
+    $payload = @{ names = $Topics } | ConvertTo-Json -Compress
+    $payload | gh api -X PUT "repos/$full/topics" --input - --silent
+    Assert-Native "topics de $full"
+    Write-Host "[GitHub] $full : equipe $TeamSlug ($permission), topics $($Topics -join ',')"
+}
+
 function Add-ToBlock {
     param(
         [string]$Path,
@@ -212,6 +255,15 @@ function Add-ToBlock {
 if (-not $WafPreset) { $WafPreset = Read-WafPreset }
 $script:WafBlock = $wafPresets[$WafPreset].Block -replace "`r?`n", "`r`n"
 Write-Host "Exposition Fortiweb : $($wafPresets[$WafPreset].Label)"
+
+# Phase 1 : depots GitHub
+if ($NoPublish) {
+    Write-Host '[Ignore] NoPublish : aucun depot GitHub cree.'
+}
+else {
+    if ($Only -contains 'Api') { Initialize-GitHubRepo -Repo "api-$Name" -TeamSlug 'api-backend' -Topics @('api') }
+    if ($Only -contains 'Spa') { Initialize-GitHubRepo -Repo "spa-$Name" -TeamSlug 'spa' -Topics @('spa', 'react') }
+}
 
 git -C $InfraPath fetch origin main --quiet
 Assert-Native 'git fetch'
