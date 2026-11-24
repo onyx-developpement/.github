@@ -216,6 +216,15 @@ function Initialize-GitHubRepo {
     }
     if ($exists) {
         Write-Host "[Ignore] Depot $full deja present"
+        # Depot vide : sans commit initial, la branche main et la PR d'init sont impossibles
+        $isEmpty = gh repo view $full --json isEmpty -q '.isEmpty'
+        Assert-Native "lecture de $full"
+        if ($isEmpty -eq 'true') {
+            $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("# $Repo`n"))
+            gh api -X PUT "repos/$full/contents/README.md" -f message='chore: README initial' -f content=$content --silent
+            Assert-Native "README initial de $full"
+            Write-Host "[GitHub] Depot $full vide : README initial ajoute sur la branche par defaut"
+        }
     }
     else {
         gh repo create $full --internal --add-readme | Out-Null
