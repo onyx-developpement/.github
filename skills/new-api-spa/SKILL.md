@@ -36,5 +36,5 @@ Le script `scripts/New-ApiSpaRepositories.ps1` enchaîne : dépôts GitHub, sque
 ## Après l'exécution
 
 - Relire et merger les PR : init api/spa, puis infra.
-- SPA : le bloc `oauth2` n'est pas généré dans le module Terraform ; le lier manuellement si besoin.
+- OAuth2 : l'API expose le scope `Api<Nom>.All` et la SPA est liée à `var.apis.api_<nom>` (avec `-Only Spa`, l'API doit déjà exister dans `azure-infrastructure`). Ajouter les `app_roles` de l'API si besoin.
 - Vérifier que les pipelines ADO utilisent `main` et que le ruleset `require-ci-status-check` est actif.

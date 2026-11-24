@@ -50,6 +50,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $under = $Name -replace '-', '_'
+$pascal = -join ($Name -split '-' | ForEach-Object { $_.Substring(0, 1).ToUpper() + $_.Substring(1) })
 $branch = "$(Get-Date -Format yyyyMMdd)-$Name"
 $initBranch = "$(Get-Date -Format yyyyMMdd)-init"
 $tfRoot = Join-Path $InfraPath 'terraform\infra'
@@ -87,6 +88,18 @@ __WAF__
     private_dns_zone     = var.private_dns_zones.privatelink_azurewebsites_net.private_dns_zone
     inbound_subnet       = var.vnet.subnets.snet_inbound
   }
+
+  oauth2 = {
+    permission_scopes = {
+      all = {
+        enabled                    = true
+        type                       = "Admin"
+        admin_consent_display_name = "Api__PASCAL__.All"
+        admin_consent_description  = "Api__PASCAL__.All"
+        value                      = "Api__PASCAL__.All"
+      }
+    }
+  }
 }
 '@
 
@@ -109,6 +122,15 @@ __WAF__
     application_insights = var.log_analytics_workspace.application_insights.appi_modern_apps
     private_dns_zone     = var.private_dns_zones.privatelink_azurewebsites_net.private_dns_zone
     inbound_subnet       = var.vnet.subnets.snet_inbound
+  }
+
+  oauth2 = {
+    groups_to_assign   = var.apis.api___UNDER__.oauth2.app_roles_groups
+    api_identifier_uri = var.apis.api___UNDER__.oauth2.identifier_uri
+    api_accesses = [{
+      api_client_id = var.apis.api___UNDER__.oauth2.application.client_id
+      scope_ids     = [var.apis.api___UNDER__.oauth2.permission_scopes["all"].scope_id]
+    }]
   }
 }
 '@
@@ -179,7 +201,7 @@ function Get-NextWafIndex([string]$Kind) {
 }
 
 function New-ModuleText([string]$Template, [string]$AspSuffix, [int]$Index) {
-    $text = $Template.Replace('__UNDER__', $under).Replace('__NAME__', $Name).Replace('__ASP__', $AspSuffix).Replace('__INDEX__', [string]$Index)
+    $text = $Template.Replace('__UNDER__', $under).Replace('__PASCAL__', $pascal).Replace('__NAME__', $Name).Replace('__ASP__', $AspSuffix).Replace('__INDEX__', [string]$Index)
     if ($script:WafBlock) { $text = $text.Replace('__WAF__', $script:WafBlock) }
     else { $text = $text -replace '\r?\n\r?\n__WAF__', '' }
     (($text -replace "`r?`n", "`r`n") + "`r`n")
@@ -412,10 +434,11 @@ function Initialize-AdoPipelines {
             Write-Host "[OK] Pipeline $pName cree"
         }
 
-        # Ruleset : check "<repo>-ci" obligatoire sur main
+        # Ruleset : check "<repo>-ci" obligatoire sur main ; l'integration copilot-instructions-deployer pousse sans PR
         $rulesetName = 'require-ci-status-check'
         $body = [ordered]@{
-            name = $rulesetName; target = 'branch'; enforcement = 'active'; bypass_actors = @()
+            name = $rulesetName; target = 'branch'; enforcement = 'active'
+            bypass_actors = @([ordered]@{ actor_id = 4806262; actor_type = 'Integration'; bypass_mode = 'always' })
             conditions = [ordered]@{ ref_name = [ordered]@{ include = @('refs/heads/main'); exclude = @() } }
             rules = @([ordered]@{
                 type = 'required_status_checks'
@@ -457,6 +480,19 @@ function Initialize-AdoPipelines {
 if (-not $WafPreset) { $WafPreset = Read-WafPreset }
 $script:WafBlock = $wafPresets[$WafPreset].Block -replace "`r?`n", "`r`n"
 Write-Host "Exposition Fortiweb : $($wafPresets[$WafPreset].Label)"
+
+# SPA seule : le bloc oauth2 reference var.apis.api_<nom>, l'API doit deja exister dans l'infra
+if ($Only -notcontains 'Api') {
+    git -C $InfraPath fetch origin main --quiet
+    Assert-Native 'git fetch'
+    foreach ($target in $environments) {
+        $locals = git -C $InfraPath show "origin/main:terraform/infra/$($target.Dir)/api/locals.tf"
+        Assert-Native "lecture de $($target.Dir)/api/locals.tf"
+        if (-not ($locals -match "^\s+api_$under\s*=")) {
+            throw "api_$under absent de $($target.Dir)/api/locals.tf sur origin/main : la SPA ne peut pas lier son bloc oauth2"
+        }
+    }
+}
 
 # Phase 1 : depots GitHub
 if ($NoPublish) {
@@ -631,7 +667,7 @@ elseif (-not $DryRun) {
 }
 Write-Host 'A faire manuellement :'
 Write-Host '  - Relire et merger les PR (init api/spa, puis infra).'
-if ($Only -contains 'Spa') {
-    Write-Host '  - SPA : bloc oauth2 non genere dans le module Terraform, a lier manuellement si necessaire.'
+if ($Only -contains 'Api') {
+    Write-Host "  - OAuth2 : scope Api$pascal.All genere ; ajouter les app_roles de l'API si necessaire."
 }
 Write-Host '  - Verifier les pipelines ADO (defaultBranch main) et le ruleset require-ci-status-check.'
