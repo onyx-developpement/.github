@@ -31,10 +31,17 @@ Le script `scripts/New-ApiSpaRepositories.ps1` enchaîne : dépôts GitHub, sque
 ## Options utiles
 
 - `-NoPublish` : commit local de la partie infra, sans push ni PR, et sans toucher à GitHub.
+- `-LinkApi` : second run qui ajoute les `api_accesses` de la SPA (branche `yyyyMMdd-<nom>-link`).
 - `-InfraPath`, `-ApiRoot`, `-SpaRoot` : chemins des clones.
 
 ## Après l'exécution
 
 - Relire et merger les PR : init api/spa, puis infra.
-- OAuth2 : l'API expose le scope `Api<Nom>.All` et la SPA est liée à `var.apis.api_<nom>` (avec `-Only Spa`, l'API doit déjà exister dans `azure-infrastructure`). Ajouter les `app_roles` de l'API si besoin.
+- OAuth2 : l'API expose le scope `Api<Nom>.All` ; la SPA reçoit `api_identifier_uri` et `groups_to_assign` de `var.apis.api_<nom>` (avec `-Only Spa`, l'API doit déjà exister dans `azure-infrastructure`). Ajouter les `app_roles` de l'API si besoin.
+- Second run, une fois la PR infra mergée et appliquée : le `client_id` de l'API n'est connu qu'après l'apply, d'où une PR séparée pour les `api_accesses` de la SPA. Faire un essai à blanc, demander confirmation, puis lancer sans `-DryRun` :
+
+  ```powershell
+  .\scripts\New-ApiSpaRepositories.ps1 -Name <nom> -LinkApi -DryRun
+  ```
+
 - Vérifier que les pipelines ADO utilisent `main` et que le ruleset `require-ci-status-check` est actif.

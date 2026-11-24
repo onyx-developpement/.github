@@ -7,6 +7,8 @@ Phase 3 : cree les pipelines Azure DevOps (ci, cicd, deploy-definition si demand
 require-ci-status-check et la PR yyyyMMdd-init -> main.
 Phase 4 : ajoute les modules Terraform prod et test d'une application api-<name> et/ou spa-<name>
 dans azure-infrastructure, sur la branche yyyyMMdd-<name> depuis origin/main, puis ouvre la PR.
+-LinkApi : second run, une fois le premier applique. Ajoute les api_accesses de la SPA vers l'API
+sur la branche yyyyMMdd-<name>-link (le client_id de l'API doit etre connu au plan).
 #>
 [CmdletBinding()]
 param(
@@ -44,7 +46,10 @@ param(
     [switch]$DryRun,
 
     # Committe la branche sans push ni PR, et ne cree rien sur GitHub.
-    [switch]$NoPublish
+    [switch]$NoPublish,
+
+    # Second run, apres l'apply du premier : ajoute les api_accesses de la SPA vers l'API (PR dediee).
+    [switch]$LinkApi
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,11 +132,6 @@ __WAF__
   oauth2 = {
     groups_to_assign   = var.apis.api___UNDER__.oauth2.app_roles_groups
     api_identifier_uri = var.apis.api___UNDER__.oauth2.identifier_uri
-    api_accesses = [{
-      name          = "api___UNDER__"
-      api_client_id = var.apis.api___UNDER__.oauth2.application.client_id
-      scope_ids     = [var.apis.api___UNDER__.oauth2.permission_scopes["all"].scope_id]
-    }]
   }
 }
 '@
@@ -477,6 +477,107 @@ function Initialize-AdoPipelines {
     finally { $ErrorActionPreference = $previous }
 }
 
+$script:PullRequests = [System.Collections.Generic.List[string]]::new()
+
+function Publish-InfraPullRequest {
+    param([string]$Head = $branch, [string]$Title, [string]$Body)
+    if (-not $Title) { $Title = "feat(infra): modules Terraform $Name" }
+    if (-not $Body) {
+        $Body = "Modules Terraform prod et test pour $Name (types : $($Only -join ', ')), index WAF $(($script:WafIndex.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ', '), exposition Fortiweb : $($wafPresets[$WafPreset].Label)."
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Push-Location $InfraPath
+    try {
+        $open = gh pr list --head $Head --state open --json url | ConvertFrom-Json
+        Assert-Native "gh pr list $Head"
+        if ($open) {
+            Write-Host "[Ignore] PR deja ouverte : $($open[0].url)"
+            $script:PullRequests.Add($open[0].url)
+            return
+        }
+        $url = gh pr create --base main --head $Head --title $Title --body $Body
+        Assert-Native 'gh pr create azure-infrastructure'
+        $url = $url | Select-Object -Last 1
+        Write-Host "[OK] PR : $url"
+        $script:PullRequests.Add($url)
+    }
+    finally {
+        Pop-Location
+        $ErrorActionPreference = $previous
+    }
+}
+
+# Second run : le client_id de l'API n'est connu qu'apres l'apply du premier, d'ou une PR dediee
+function Invoke-LinkApi {
+    $linkBranch = "$branch-link"
+    $marker = "^(\s*)api_identifier_uri\s*=\s*var\.apis\.api_$under\.oauth2\.identifier_uri\s*$"
+    $accesses = @(
+        '    api_accesses = [{'
+        "      api_client_id = var.apis.api_$under.oauth2.application.client_id"
+        "      scope_ids     = [var.apis.api_$under.oauth2.permission_scopes[`"all`"].scope_id]"
+        '    }]'
+    )
+    $relPaths = @($environments | ForEach-Object { "terraform/infra/$($_.Dir)/spa/$Name.modules.tf" })
+
+    git -C $InfraPath fetch origin main --quiet
+    Assert-Native 'git fetch'
+    $todo = @(foreach ($rel in $relPaths) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $lines = @(git -C $InfraPath show "origin/main:$rel" 2>$null) } finally { $ErrorActionPreference = $previous }
+        if ($LASTEXITCODE -ne 0) { throw "$rel absent de origin/main : merger et appliquer d'abord la PR infra de $Name" }
+        if ($lines -match '^\s*api_accesses\s*=') { Write-Host "[Ignore] api_accesses deja present dans $rel"; continue }
+        if (-not ($lines -match $marker)) { throw "api_identifier_uri vers api_$under introuvable dans $rel" }
+        $rel
+    })
+    if ($todo.Count -eq 0) { return }
+
+    if ($DryRun) {
+        foreach ($rel in $todo) {
+            Write-Host "[DryRun] Modification $rel"
+            $accesses | ForEach-Object { Write-Host "  + $_" }
+        }
+        return
+    }
+
+    $remoteBranch = git -C $InfraPath ls-remote --heads origin $linkBranch
+    Assert-Native 'git ls-remote'
+    if (-not $remoteBranch) {
+        if (git -C $InfraPath status --porcelain) { throw "Arbre de travail non propre dans $InfraPath" }
+        git -C $InfraPath checkout --quiet -b $linkBranch origin/main
+        Assert-Native 'git checkout'
+        foreach ($rel in $todo) {
+            $path = Join-Path $InfraPath $rel
+            $out = foreach ($line in [IO.File]::ReadAllLines($path)) {
+                $line
+                if ($line -match $marker) { $accesses }
+            }
+            [IO.File]::WriteAllText($path, (($out -join "`r`n") + "`r`n"), $utf8)
+        }
+        git -C $InfraPath add -- $todo
+        Assert-Native 'git add'
+        git -C $InfraPath commit --quiet -m "feat(infra): lie la SPA $Name a l'API $Name (api_accesses)"
+        Assert-Native 'git commit'
+        if ($NoPublish) {
+            Write-Host "Branche $linkBranch committee localement (NoPublish : ni push ni PR)."
+            return
+        }
+        git -C $InfraPath push -u origin $linkBranch
+        Assert-Native 'git push'
+    }
+    Publish-InfraPullRequest -Head $linkBranch -Title "feat(infra): api_accesses spa-$Name vers api-$Name" `
+        -Body "Second run : la SPA $Name obtient l'acces au scope Api$pascal.All de l'API $Name, maintenant creee par l'apply precedent."
+}
+
+if ($LinkApi) {
+    Invoke-LinkApi
+    Write-Host ''
+    Write-Host "=== Liaison SPA -> API $Name $(if ($DryRun) { '(DryRun)' }) ===" -ForegroundColor Cyan
+    $script:PullRequests | ForEach-Object { Write-Host "  $_" }
+    return
+}
+
 # Exposition Fortiweb choisie avant toute modification
 if (-not $WafPreset) { $WafPreset = Read-WafPreset }
 $script:WafBlock = $wafPresets[$WafPreset].Block -replace "`r?`n", "`r`n"
@@ -513,38 +614,12 @@ if (-not $NoPublish) {
 }
 
 # Phase 3 : pipelines Azure DevOps, ruleset et PR d'init
-$script:PullRequests = [System.Collections.Generic.List[string]]::new()
 if (-not $NoPublish) {
     if ($Only -contains 'Api' -and $null -eq $DefinitionPipeline) {
         $DefinitionPipeline = (Read-Host "L'API sera-t-elle utilisee par d'autres API Java ? (o/N)") -match '^[oOyY]'
     }
     if ($Only -contains 'Api') { Initialize-AdoPipelines -Kind api }
     if ($Only -contains 'Spa') { Initialize-AdoPipelines -Kind spa }
-}
-
-function Publish-InfraPullRequest {
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    Push-Location $InfraPath
-    try {
-        $open = gh pr list --head $branch --state open --json url | ConvertFrom-Json
-        Assert-Native "gh pr list $branch"
-        if ($open) {
-            Write-Host "[Ignore] PR deja ouverte : $($open[0].url)"
-            $script:PullRequests.Add($open[0].url)
-            return
-        }
-        $body = "Modules Terraform prod et test pour $Name (types : $($Only -join ', ')), index WAF $(($script:WafIndex.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ', '), exposition Fortiweb : $($wafPresets[$WafPreset].Label)."
-        $url = gh pr create --base main --head $branch --title "feat(infra): modules Terraform $Name" --body $body
-        Assert-Native 'gh pr create azure-infrastructure'
-        $url = $url | Select-Object -Last 1
-        Write-Host "[OK] PR : $url"
-        $script:PullRequests.Add($url)
-    }
-    finally {
-        Pop-Location
-        $ErrorActionPreference = $previous
-    }
 }
 
 function Initialize-Infra {
@@ -670,5 +745,8 @@ Write-Host 'A faire manuellement :'
 Write-Host '  - Relire et merger les PR (init api/spa, puis infra).'
 if ($Only -contains 'Api') {
     Write-Host "  - OAuth2 : scope Api$pascal.All genere ; ajouter les app_roles de l'API si necessaire."
+}
+if ($Only -contains 'Spa') {
+    Write-Host "  - Apres merge et apply de la PR infra : relancer avec -Name $Name -LinkApi pour ajouter les api_accesses de la SPA."
 }
 Write-Host '  - Verifier les pipelines ADO (defaultBranch main) et le ruleset require-ci-status-check.'
