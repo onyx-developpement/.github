@@ -434,10 +434,11 @@ function Initialize-AdoPipelines {
             Write-Host "[OK] Pipeline $pName cree"
         }
 
-        # Ruleset : check "<repo>-ci" obligatoire sur main
+        # Ruleset : check "<repo>-ci" obligatoire sur main ; l'integration copilot-instructions-deployer pousse sans PR
         $rulesetName = 'require-ci-status-check'
         $body = [ordered]@{
-            name = $rulesetName; target = 'branch'; enforcement = 'active'; bypass_actors = @()
+            name = $rulesetName; target = 'branch'; enforcement = 'active'
+            bypass_actors = @([ordered]@{ actor_id = 4806262; actor_type = 'Integration'; bypass_mode = 'always' })
             conditions = [ordered]@{ ref_name = [ordered]@{ include = @('refs/heads/main'); exclude = @() } }
             rules = @([ordered]@{
                 type = 'required_status_checks'
