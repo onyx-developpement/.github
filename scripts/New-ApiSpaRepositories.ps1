@@ -1,6 +1,10 @@
 #Requires -Version 5.1
 <#
 Phase 1 : cree les depots GitHub internes api-<name> et/ou spa-<name> (README, topics, equipe en ecriture).
+Phase 2 : clone les depots, genere le squelette (archetype Maven api-archetype / npm create @nutriset/react-spa)
+sur la branche yyyyMMdd-init, committe et pousse cette branche (pas main).
+Phase 3 : cree les pipelines Azure DevOps (ci, cicd, deploy-definition si demande), le ruleset
+require-ci-status-check et la PR yyyyMMdd-init -> main.
 Phase 4 : ajoute les modules Terraform prod et test d'une application api-<name> et/ou spa-<name>
 dans azure-infrastructure, sur la branche yyyyMMdd-<name> depuis origin/main, puis ouvre la PR.
 #>
@@ -16,6 +20,19 @@ param(
     [string]$InfraPath = 'C:\dev\git\TransverseSI\azure-infrastructure',
 
     [string]$GitHubOrg = 'onyx-developpement',
+
+    [string]$ApiRoot = 'C:\dev\git\API Backend',
+
+    [string]$SpaRoot = 'C:\dev\git\SPA',
+
+    # Port local de l'API (defaut : plus grand port des .run des API existantes + 1).
+    [ValidateRange(7000, 7999)]
+    [int]$LocalPort,
+
+    [string]$ArchetypeVersion = '2.0.0',
+
+    # Cree le pipeline <api>-deploy-definition (API utilisee par d'autres API Java) ; demande si absent.
+    [Nullable[bool]]$DefinitionPipeline,
 
     # Exposition Fortiweb (demandee si absente) :
     # PartoutSaufOT = internet compris (calque wfp), InterneSaufOT = defauts du module (calque proxy-m3),
@@ -34,6 +51,7 @@ $ErrorActionPreference = 'Stop'
 
 $under = $Name -replace '-', '_'
 $branch = "$(Get-Date -Format yyyyMMdd)-$Name"
+$initBranch = "$(Get-Date -Format yyyyMMdd)-init"
 $tfRoot = Join-Path $InfraPath 'terraform\infra'
 $environments = @(
     [pscustomobject]@{ Dir = 'sub-modern-apps-prod'; AspSuffix = '004' }
@@ -44,7 +62,7 @@ if ($Only -contains 'Api') { $kinds += 'api' }
 if ($Only -contains 'Spa') { $kinds += 'spa' }
 $utf8 = [Text.UTF8Encoding]::new($false)
 $script:Changed = [System.Collections.Generic.List[string]]::new()
-$index = $null
+$script:WafIndex = [ordered]@{}
 
 $apiTemplate = @'
 module "api___UNDER__" {
@@ -147,22 +165,21 @@ function Read-WafPreset {
     }
 }
 
-function Get-NextWafIndex {
+# Sequence propre a chaque type : Fortiweb.ps1 decale l'index par type (Get-StartIndex -Type).
+function Get-NextWafIndex([string]$Kind) {
     $indexes = foreach ($target in $environments) {
-        foreach ($kind in 'api', 'spa') {
-            $dir = Join-Path $tfRoot "$($target.Dir)\$kind"
-            if (Test-Path -LiteralPath $dir) {
-                Select-String -Path (Join-Path $dir '*.tf') -Pattern 'waf_config_index\s*=\s*(\d+)' |
-                    ForEach-Object { [int]$_.Matches[0].Groups[1].Value }
-            }
+        $dir = Join-Path $tfRoot "$($target.Dir)\$Kind"
+        if (Test-Path -LiteralPath $dir) {
+            Select-String -Path (Join-Path $dir '*.tf') -Pattern 'waf_config_index\s*=\s*(\d+)' |
+                ForEach-Object { [int]$_.Matches[0].Groups[1].Value }
         }
     }
     $max = ($indexes | Measure-Object -Maximum).Maximum
     if ($null -eq $max) { 0 } else { [int]$max + 1 }
 }
 
-function New-ModuleText([string]$Template, [string]$AspSuffix) {
-    $text = $Template.Replace('__UNDER__', $under).Replace('__NAME__', $Name).Replace('__ASP__', $AspSuffix).Replace('__INDEX__', [string]$index)
+function New-ModuleText([string]$Template, [string]$AspSuffix, [int]$Index) {
+    $text = $Template.Replace('__UNDER__', $under).Replace('__NAME__', $Name).Replace('__ASP__', $AspSuffix).Replace('__INDEX__', [string]$Index)
     if ($script:WafBlock) { $text = $text.Replace('__WAF__', $script:WafBlock) }
     else { $text = $text -replace '\r?\n\r?\n__WAF__', '' }
     (($text -replace "`r?`n", "`r`n") + "`r`n")
@@ -218,6 +235,88 @@ function Initialize-GitHubRepo {
     Write-Host "[GitHub] $full : equipe $TeamSlug ($permission), topics $($Topics -join ',')"
 }
 
+function Get-NextLocalPort {
+    $ports = Get-ChildItem -Path (Join-Path $ApiRoot '*\.run\*.xml') -ErrorAction SilentlyContinue |
+        Select-String -Pattern 'server\.port=(7\d{3})' |
+        ForEach-Object { [int]$_.Matches[0].Groups[1].Value }
+    $max = ($ports | Measure-Object -Maximum).Maximum
+    if ($null -eq $max) { 7001 } else { [int]$max + 1 }
+}
+
+# Idempotent : ignore si la branche init existe deja sur origin.
+function Initialize-Scaffold {
+    param([ValidateSet('api', 'spa')][string]$Kind)
+    $repo = "$Kind-$Name"
+    $full = "$GitHubOrg/$repo"
+    $root = if ($Kind -eq 'api') { $ApiRoot } else { $SpaRoot }
+    $dest = Join-Path $root $repo
+    if ($DryRun) {
+        Write-Host "[DryRun] Scaffold $full dans $dest : branche $initBranch, port local $LocalPort, commit et push"
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $dest)) {
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        gh repo clone $full $dest
+        Assert-Native "clone de $full"
+    }
+    elseif (git -C $dest status --porcelain) {
+        throw "Arbre de travail non propre dans $dest"
+    }
+    git -C $dest fetch origin --quiet
+    Assert-Native "git fetch $repo"
+    if (git -C $dest ls-remote --heads origin $initBranch) {
+        Write-Host "[Ignore] Branche $initBranch deja presente sur $full"
+        return
+    }
+    git -C $dest checkout -b $initBranch origin/main
+    Assert-Native "git checkout $repo"
+
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "scaffold-$repo-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        Push-Location $tmp
+        try {
+            if ($Kind -eq 'api') {
+                mvn archetype:generate -B '-DarchetypeGroupId=fr.nutriset' '-DarchetypeArtifactId=api-archetype' "-DarchetypeVersion=$ArchetypeVersion" '-DgroupId=fr.nutriset' "-DartifactId=$repo" '-Dversion=1.0' "-DlocalPort=$LocalPort"
+                Assert-Native 'mvn archetype:generate'
+            }
+            else {
+                npm create '@nutriset/react-spa@latest' -- $repo --yes --api-path "api-$Name" --local-port $LocalPort
+                Assert-Native 'npm create @nutriset/react-spa'
+            }
+        }
+        finally { Pop-Location }
+        $generated = Join-Path $tmp $repo
+        if (-not (Test-Path -LiteralPath $generated)) { throw "Squelette introuvable : $generated" }
+        robocopy $generated $dest /E /XD node_modules .git /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy a echoue (code $LASTEXITCODE)" }
+        # Le lockfile doit etre committe : on relance l'installation si celle du generateur a echoue
+        if ($Kind -eq 'spa' -and -not (Test-Path -LiteralPath (Join-Path $dest 'package-lock.json'))) {
+            Push-Location $dest
+            try {
+                npm install
+                Assert-Native 'npm install (authentification Azure Artifacts requise : npx vsts-npm-auth -config $env:USERPROFILE\.npmrc)'
+            }
+            finally { Pop-Location }
+        }
+    }
+    finally {
+        $ErrorActionPreference = $previous
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    git -C $dest add -A
+    Assert-Native "git add $repo"
+    git -C $dest commit -m "feat: squelette initial $repo"
+    Assert-Native "git commit $repo"
+    git -C $dest push -u origin $initBranch
+    Assert-Native "git push $repo"
+    Write-Host "[Scaffold] $full : branche $initBranch poussee"
+}
+
 function Add-ToBlock {
     param(
         [string]$Path,
@@ -251,6 +350,100 @@ function Add-ToBlock {
     [IO.File]::WriteAllText($Path, (($lines -join "`r`n") + "`r`n"), $utf8)
 }
 
+function Initialize-AdoPipelines {
+    param([ValidateSet('api', 'spa')][string]$Kind)
+    $repo = "$Kind-$Name"
+    $project = if ($Kind -eq 'api') { 'API Backend' } else { 'SPA' }
+    $orgUrl = 'https://dev.azure.com/nutriset'
+    $serviceConnectionId = '5a964410-440c-44eb-8cf2-9b02b478a2e1'
+    $repoUrl = "https://github.com/$GitHubOrg/$repo"
+    $pipelines = @(
+        @{ Suffix = 'ci'; Yaml = 'pipeline-ci.yml'; StripPrTrigger = $false }
+        @{ Suffix = 'cicd'; Yaml = 'pipeline-cicd.yml'; StripPrTrigger = $true }
+    )
+    if ($Kind -eq 'api' -and $DefinitionPipeline) {
+        $pipelines += @{ Suffix = 'deploy-definition'; Yaml = 'pipeline-deploy-definition.yml'; StripPrTrigger = $false }
+    }
+
+    if ($DryRun) {
+        Write-Host "[DryRun] ADO '$project' : pipelines $(($pipelines | ForEach-Object { "$repo-$($_.Suffix)" }) -join ', ') (branche $initBranch puis defaut main)"
+        Write-Host "[DryRun] GitHub $repo : ruleset require-ci-status-check ($repo-ci) et PR $initBranch -> main"
+        return
+    }
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv
+        Assert-Native 'az account get-access-token (az login requis)'
+        $headers = @{ Authorization = "Bearer $token" }
+        $proj = az devops project show --organization $orgUrl --project $project | ConvertFrom-Json
+        Assert-Native "az devops project show $project"
+
+        foreach ($p in $pipelines) {
+            $pName = "$repo-$($p.Suffix)"
+            $found = az pipelines list --organization $orgUrl --project $proj.id --name $pName | ConvertFrom-Json
+            if (@($found).Count -gt 0) { Write-Host "[Ignore] Pipeline $pName existe deja"; continue }
+
+            $created = az pipelines create --organization $orgUrl --project $proj.id --name $pName `
+                --branch $initBranch --repository $repoUrl --yaml-path "azure-pipelines/$($p.Yaml)" `
+                --repository-type github --service-connection $serviceConnectionId `
+                --skip-first-run --folder-path $repo | ConvertFrom-Json
+            Assert-Native "az pipelines create $pName"
+
+            # Les YAML ne sont pas encore sur main : la branche par defaut est basculee apres creation
+            $defUri = "$orgUrl/$($proj.id)/_apis/build/definitions/$($created.id)?api-version=7.1"
+            $def = Invoke-RestMethod -Uri $defUri -Headers $headers -Method Get
+            $def.repository.defaultBranch = 'refs/heads/main'
+            if ($p.StripPrTrigger) {
+                $def.triggers = @($def.triggers | Where-Object { $_.triggerType -ne 'pullRequest' })
+            }
+            Invoke-RestMethod -Uri $defUri -Headers $headers -Method Put -Body ($def | ConvertTo-Json -Depth 30) `
+                -ContentType 'application/json; charset=utf-8' | Out-Null
+            Write-Host "[OK] Pipeline $pName cree"
+        }
+
+        # Ruleset : check "<repo>-ci" obligatoire sur main
+        $rulesetName = 'require-ci-status-check'
+        $body = [ordered]@{
+            name = $rulesetName; target = 'branch'; enforcement = 'active'; bypass_actors = @()
+            conditions = [ordered]@{ ref_name = [ordered]@{ include = @('refs/heads/main'); exclude = @() } }
+            rules = @([ordered]@{
+                type = 'required_status_checks'
+                parameters = [ordered]@{
+                    required_status_checks = @([ordered]@{ context = "$repo-ci" })
+                    strict_required_status_checks_policy = $false
+                }
+            })
+        }
+        $tmpFile = Join-Path $env:TEMP "ruleset-$repo-$(Get-Random).json"
+        [IO.File]::WriteAllText($tmpFile, ($body | ConvertTo-Json -Depth 20), $utf8)
+        $rulesets = gh api "repos/$GitHubOrg/$repo/rulesets" | ConvertFrom-Json
+        $rulesetId = @($rulesets | Where-Object { $_.name -eq $rulesetName })[0].id
+        if ($rulesetId) { $null = gh api -X PUT "repos/$GitHubOrg/$repo/rulesets/$rulesetId" --input $tmpFile 2>&1 }
+        else { $null = gh api -X POST "repos/$GitHubOrg/$repo/rulesets" --input $tmpFile 2>&1 }
+        $rc = $LASTEXITCODE
+        Remove-Item $tmpFile -ErrorAction SilentlyContinue
+        if ($rc -ne 0) { throw "Ruleset $rulesetName ($repo) en echec" }
+        Write-Host "[OK] Ruleset $rulesetName ($repo-ci)"
+
+        # PR init -> main
+        $open = gh pr list -R "$GitHubOrg/$repo" --head $initBranch --state open --json url | ConvertFrom-Json
+        if (@($open).Count -gt 0) {
+            Write-Host "[Ignore] PR deja ouverte : $($open[0].url)"
+            $script:PullRequests.Add($open[0].url)
+        }
+        else {
+            $url = gh pr create -R "$GitHubOrg/$repo" --head $initBranch --base main `
+                --title "feat: squelette initial $repo" --body "Squelette genere par New-ApiSpaRepositories.ps1."
+            Assert-Native "gh pr create $repo"
+            Write-Host "[OK] PR : $url"
+            $script:PullRequests.Add(($url | Select-Object -Last 1))
+        }
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
 # Exposition Fortiweb choisie avant toute modification
 if (-not $WafPreset) { $WafPreset = Read-WafPreset }
 $script:WafBlock = $wafPresets[$WafPreset].Block -replace "`r?`n", "`r`n"
@@ -265,79 +458,171 @@ else {
     if ($Only -contains 'Spa') { Initialize-GitHubRepo -Repo "spa-$Name" -TeamSlug 'spa' -Topics @('spa', 'react') }
 }
 
-git -C $InfraPath fetch origin main --quiet
-Assert-Native 'git fetch'
-
-# Verifications et branche (hors DryRun : l'arbre doit etre propre, la branche part de origin/main)
-if (-not $DryRun) {
-    if (git -C $InfraPath status --porcelain) { throw "Arbre de travail non propre dans $InfraPath" }
-    git -C $InfraPath checkout -b $branch origin/main
-    Assert-Native 'git checkout'
+# Phase 2 : squelette sur la branche init
+if (-not $NoPublish) {
+    if (-not $LocalPort) { $LocalPort = Get-NextLocalPort }
+    Write-Host "Port local de l'API : $LocalPort"
+    if ($Only -contains 'Api') { Initialize-Scaffold -Kind api }
+    if ($Only -contains 'Spa') { Initialize-Scaffold -Kind spa }
 }
 
-# Module deja present : on arrete avant toute modification
-$existing = @(foreach ($target in $environments) {
-    foreach ($kind in $kinds) {
-        $path = Join-Path $tfRoot "$($target.Dir)\$kind\$Name.modules.tf"
-        if (Test-Path -LiteralPath $path) { $path }
+# Phase 3 : pipelines Azure DevOps, ruleset et PR d'init
+$script:PullRequests = [System.Collections.Generic.List[string]]::new()
+if (-not $NoPublish) {
+    if ($Only -contains 'Api' -and $null -eq $DefinitionPipeline) {
+        $DefinitionPipeline = (Read-Host "L'API sera-t-elle utilisee par d'autres API Java ? (o/N)") -match '^[oOyY]'
     }
-})
-if ($existing.Count -gt 0) { throw "Module deja present : $($existing -join ', ')" }
+    if ($Only -contains 'Api') { Initialize-AdoPipelines -Kind api }
+    if ($Only -contains 'Spa') { Initialize-AdoPipelines -Kind spa }
+}
 
-$index = Get-NextWafIndex
-Write-Host "Index WAF attribue : $index"
+function Publish-InfraPullRequest {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Push-Location $InfraPath
+    try {
+        $open = gh pr list --head $branch --state open --json url | ConvertFrom-Json
+        Assert-Native "gh pr list $branch"
+        if ($open) {
+            Write-Host "[Ignore] PR deja ouverte : $($open[0].url)"
+            $script:PullRequests.Add($open[0].url)
+            return
+        }
+        $body = "Modules Terraform prod et test pour $Name (types : $($Only -join ', ')), index WAF $(($script:WafIndex.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ', '), exposition Fortiweb : $($wafPresets[$WafPreset].Label)."
+        $url = gh pr create --base main --head $branch --title "feat(infra): modules Terraform $Name" --body $body
+        Assert-Native 'gh pr create azure-infrastructure'
+        $url = $url | Select-Object -Last 1
+        Write-Host "[OK] PR : $url"
+        $script:PullRequests.Add($url)
+    }
+    finally {
+        Pop-Location
+        $ErrorActionPreference = $previous
+    }
+}
 
-foreach ($target in $environments) {
-    $root = Join-Path $tfRoot $target.Dir
+function Initialize-Infra {
+    git -C $InfraPath fetch origin main --quiet
+    Assert-Native 'git fetch'
 
-    Add-ToBlock -Path (Join-Path $root 'apps-resource-groups\locals.tf') -OpenPattern '^  resource_groups = \{$' -CloseLine '  }' `
-        -Entries @("    $under = {", '      version = "001"', '    }') -SkipIfMatch "^    $under = \{$"
+    # Modules deja sur origin/main : rien a faire ; presence partielle : arret
+    $paths = @(foreach ($target in $environments) {
+        foreach ($kind in $kinds) { "terraform/infra/$($target.Dir)/$kind/$Name.modules.tf" }
+    })
+    $onMain = @($paths | Where-Object { git -C $InfraPath ls-tree --name-only origin/main -- $_ })
+    if ($onMain.Count -eq $paths.Count) {
+        Write-Host "[Ignore] Modules Terraform deja presents sur origin/main."
+        return
+    }
+    if ($onMain.Count -gt 0) { throw "Modules partiellement presents sur origin/main : $($onMain -join ', ')" }
 
-    if ($Only -contains 'Api') {
-        Add-ToBlock -Path (Join-Path $root 'api\locals.tf') -OpenPattern '^  apps = \[$' -CloseLine '  ]' -CommaSeparated `
-            -Entries @("    module.api_$under,") -SkipIfMatch "^\s+module\.api_$under,?$"
-        Add-ToBlock -Path (Join-Path $root 'api\locals.tf') -OpenPattern '^  apis = \{$' -CloseLine '  }' `
-            -Entries @("    api_$under = module.api_$under") -SkipIfMatch "^\s+api_$under\s*="
-        Write-Change (Join-Path $root "api\$Name.modules.tf") (New-ModuleText $apiTemplate $target.AspSuffix)
+    # Branche deja creee par un run precedent : reprise du push et de la PR
+    $remoteBranch = git -C $InfraPath ls-remote --heads origin $branch
+    Assert-Native 'git ls-remote'
+    git -C $InfraPath rev-parse --verify --quiet "refs/heads/$branch" | Out-Null
+    $localBranch = $LASTEXITCODE -eq 0
+    if ($remoteBranch -or $localBranch) {
+        if ($DryRun -or $NoPublish) {
+            Write-Host "[Ignore] Branche $branch deja existante dans azure-infrastructure (reprise push/PR hors DryRun/NoPublish)."
+            return
+        }
+        if (-not $remoteBranch) {
+            git -C $InfraPath push -u origin $branch
+            Assert-Native 'git push'
+        }
+        Publish-InfraPullRequest
+        return
     }
 
-    if ($Only -contains 'Spa') {
-        Add-ToBlock -Path (Join-Path $root 'spa\locals.tf') -OpenPattern '^  apps = \[$' -CloseLine '  ]' -CommaSeparated `
-            -Entries @("    module.spa_$under,") -SkipIfMatch "^\s+module\.spa_$under,?$"
-        Write-Change (Join-Path $root "spa\$Name.modules.tf") (New-ModuleText $spaTemplate $target.AspSuffix)
+    # DryRun : lecture d'un worktree temporaire sur origin/main (le clone n'est pas touche)
+    $workPath = $InfraPath
+    if ($DryRun) {
+        $workPath = Join-Path ([IO.Path]::GetTempPath()) "infra-dryrun-$Name-$(Get-Random)"
+        git -C $InfraPath worktree add --detach --quiet $workPath origin/main
+        Assert-Native 'git worktree add'
     }
+    else {
+        if (git -C $InfraPath status --porcelain) { throw "Arbre de travail non propre dans $InfraPath" }
+        git -C $InfraPath checkout --quiet -b $branch origin/main
+        Assert-Native 'git checkout'
+    }
+
+    try {
+        $script:tfRoot = Join-Path $workPath 'terraform\infra'
+        foreach ($kind in $kinds) {
+            $script:WafIndex[$kind] = Get-NextWafIndex $kind
+            Write-Host "Index WAF $kind attribue : $($script:WafIndex[$kind])"
+        }
+
+        foreach ($target in $environments) {
+            $root = Join-Path $tfRoot $target.Dir
+
+            Add-ToBlock -Path (Join-Path $root 'apps-resource-groups\locals.tf') -OpenPattern '^  resource_groups = \{$' -CloseLine '  }' `
+                -Entries @("    $under = {", '      version = "001"', '    }') -SkipIfMatch "^    $under = \{$"
+
+            if ($Only -contains 'Api') {
+                Add-ToBlock -Path (Join-Path $root 'api\locals.tf') -OpenPattern '^  apps = \[$' -CloseLine '  ]' -CommaSeparated `
+                    -Entries @("    module.api_$under,") -SkipIfMatch "^\s+module\.api_$under,?$"
+                Add-ToBlock -Path (Join-Path $root 'api\locals.tf') -OpenPattern '^  apis = \{$' -CloseLine '  }' `
+                    -Entries @("    api_$under = module.api_$under") -SkipIfMatch "^\s+api_$under\s*="
+                Write-Change (Join-Path $root "api\$Name.modules.tf") (New-ModuleText $apiTemplate $target.AspSuffix $script:WafIndex.api)
+            }
+
+            if ($Only -contains 'Spa') {
+                Add-ToBlock -Path (Join-Path $root 'spa\locals.tf') -OpenPattern '^  apps = \[$' -CloseLine '  ]' -CommaSeparated `
+                    -Entries @("    module.spa_$under,") -SkipIfMatch "^\s+module\.spa_$under,?$"
+                Write-Change (Join-Path $root "spa\$Name.modules.tf") (New-ModuleText $spaTemplate $target.AspSuffix $script:WafIndex.spa)
+            }
+        }
+    }
+    finally {
+        if ($DryRun) {
+            git -C $InfraPath worktree remove --force $workPath
+            Assert-Native 'git worktree remove'
+        }
+    }
+
+    if ($DryRun) {
+        Write-Host '[DryRun] Phase 4 terminee, aucune modification ecrite.'
+        return
+    }
+
+    $fileList = @($script:Changed | Sort-Object -Unique)
+    if (Get-Command terraform -ErrorAction SilentlyContinue) {
+        terraform fmt @fileList | Out-Null
+    }
+
+    git -C $InfraPath add -A
+    Assert-Native 'git add'
+    git -C $InfraPath commit --quiet -m "feat(infra): ajoute les modules Terraform $Name"
+    Assert-Native 'git commit'
+
+    if ($NoPublish) {
+        Write-Host "Branche $branch committee localement (NoPublish : ni push ni PR)."
+        return
+    }
+
+    git -C $InfraPath push -u origin $branch
+    Assert-Native 'git push'
+    Publish-InfraPullRequest
 }
 
-if ($DryRun) {
-    Write-Host '[DryRun] Termine, aucune modification ecrite.'
-    return
-}
+# Phase 4 : modules Terraform dans azure-infrastructure
+Initialize-Infra
 
-$fileList = @($script:Changed | Sort-Object -Unique)
-if (Get-Command terraform -ErrorAction SilentlyContinue) {
-    terraform fmt @fileList | Out-Null
+# Phase 5 : resume final
+Write-Host ''
+Write-Host "=== Resume $Name $(if ($DryRun) { '(DryRun)' }) ===" -ForegroundColor Cyan
+if ($script:PullRequests.Count -gt 0) {
+    Write-Host 'Pull requests :'
+    $script:PullRequests | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
 }
-
-git -C $InfraPath add -A
-Assert-Native 'git add'
-git -C $InfraPath commit -m "feat(infra): ajoute les modules Terraform $Name"
-Assert-Native 'git commit'
-
-if ($NoPublish) {
-    Write-Host "Branche $branch committee localement (NoPublish : ni push ni PR)."
-    return
+elseif (-not $DryRun) {
+    Write-Host 'Aucune pull request creee.'
 }
-
-git -C $InfraPath push -u origin $branch
-Assert-Native 'git push'
-
-Push-Location $InfraPath
-try {
-    $body = "Modules Terraform prod et test pour $Name (types : $($Only -join ', ')), index WAF $index, exposition Fortiweb : $($wafPresets[$WafPreset].Label)."
-    $prUrl = gh pr create --base main --head $branch --title "feat(infra): modules Terraform $Name" --body $body
-    Assert-Native 'gh pr create'
-    Write-Host "PR : $prUrl"
+Write-Host 'A faire manuellement :'
+Write-Host '  - Relire et merger les PR (init api/spa, puis infra).'
+if ($Only -contains 'Spa') {
+    Write-Host '  - SPA : bloc oauth2 non genere dans le module Terraform, a lier manuellement si necessaire.'
 }
-finally {
-    Pop-Location
-}
+Write-Host '  - Verifier les pipelines ADO (defaultBranch main) et le ruleset require-ci-status-check.'
